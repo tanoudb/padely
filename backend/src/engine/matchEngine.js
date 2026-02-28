@@ -64,7 +64,7 @@ export function evaluateMatch(payload) {
     teamUnderdog,
     clutchTeamBonus,
   }) => {
-    const baseK = 24;
+    const baseK = player.kFactor ?? 24;
     const actual = didTeamWin ? 1 : 0;
     const baseDelta = baseK * domination * (actual - expected);
     const clutchDelta = didTeamWin ? clutchTeamBonus : 0;

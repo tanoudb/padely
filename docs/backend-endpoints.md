@@ -12,6 +12,7 @@
 
 - GET `/api/v1/profile`
 - PUT `/api/v1/profile/athlete`
+- PUT `/api/v1/profile/onboarding`
 - POST `/api/v1/bag/items`
 - GET `/api/v1/bag/items`
 

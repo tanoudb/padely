@@ -28,7 +28,11 @@ import {
   listMatchesForUser,
   validateMatch,
 } from './services/matchService.js';
-import { getProfile, updateAthleteProfile } from './services/profileService.js';
+import {
+  completeOnboarding,
+  getProfile,
+  updateAthleteProfile,
+} from './services/profileService.js';
 import {
   getDashboard,
   getDuoStats,
@@ -97,6 +101,12 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/v1/profile') {
       const me = await requireAuth(req);
       return json(res, 200, await getProfile(me.id));
+    }
+
+    if (req.method === 'PUT' && url.pathname === '/api/v1/profile/onboarding') {
+      const me = await requireAuth(req);
+      const payload = await readJson(req);
+      return json(res, 200, await completeOnboarding(me.id, payload));
     }
 
     if (req.method === 'POST' && url.pathname === '/api/v1/bag/items') {

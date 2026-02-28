@@ -3,10 +3,10 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { theme } from '../theme';
 
 const TABS = [
-  { key: 'home', label: 'Arena' },
-  { key: 'play', label: 'Jouer' },
-  { key: 'community', label: 'Crew' },
-  { key: 'stats', label: 'DNA' },
+  { key: 'home', label: 'Accueil' },
+  { key: 'play', label: 'Match' },
+  { key: 'partners', label: 'Partenaires' },
+  { key: 'stats', label: 'Stats' },
 ];
 
 export function TabBar({ active, onChange }) {
@@ -57,9 +57,9 @@ const styles = StyleSheet.create({
   label: {
     color: theme.colors.text,
     fontFamily: theme.fonts.title,
-    fontSize: 12,
+    fontSize: 11,
     textTransform: 'uppercase',
-    letterSpacing: 1,
+    letterSpacing: 0.8,
   },
   labelActive: {
     color: '#3A2500',

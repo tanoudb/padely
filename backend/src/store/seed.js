@@ -50,6 +50,17 @@ export async function seedDemoData() {
       city: player.city,
       location: player.location,
       pir: 55,
+      athlete: {
+        ...user.athlete,
+        level: 4,
+      },
+      onboarding: {
+        completed: true,
+        quizAnswers: null,
+      },
+      calibration: {
+        remainingMatches: 0,
+      },
     });
   }
 }

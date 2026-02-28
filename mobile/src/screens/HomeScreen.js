@@ -35,14 +35,14 @@ export function HomeScreen() {
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.content}>
       <View style={styles.header}>
-        <Text style={styles.eyebrow}>PADELY ARENA</Text>
+        <Text style={styles.eyebrow}>CENTRE PADELY</Text>
         <Text style={styles.h1}>Salut {user.displayName}</Text>
       </View>
 
       <Card elevated style={styles.hero}>
-        <Text style={styles.heroLabel}>PIR LIVE</Text>
+        <Text style={styles.heroLabel}>PIR EN DIRECT</Text>
         <Text style={styles.heroValue}>{Math.round(pir)}</Text>
-        <Text style={styles.heroMeta}>Rang {rankFromRating(rating)} · Rating {Math.round(rating)}</Text>
+        <Text style={styles.heroMeta}>Rang {rankFromRating(rating)} · Classement {Math.round(rating)}</Text>
         <View style={styles.progressTrack}>
           <View style={[styles.progressFill, { width: `${Math.max(8, Math.min(100, pir))}%` }]} />
         </View>
@@ -58,7 +58,7 @@ export function HomeScreen() {
           <Text style={styles.metricValue}>{losses}</Text>
         </Card>
         <Card style={styles.metricCard}>
-          <Text style={styles.metricLabel}>Winrate</Text>
+          <Text style={styles.metricLabel}>Taux de victoire</Text>
           <Text style={styles.metricValue}>{winRate}%</Text>
         </Card>
         <Card style={styles.metricCard}>

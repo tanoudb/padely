@@ -10,21 +10,38 @@ export function SessionProvider({ children }) {
   const value = useMemo(() => ({
     token,
     user,
-    async register(email, password, displayName) {
+    async register(email, password, displayName, onboardingPayload) {
       const out = await api.register({ email, password, displayName });
       setToken(out.token);
-      setUser(out.user);
+
+      try {
+        if (onboardingPayload) {
+          const profile = await api.completeOnboarding(out.token, onboardingPayload);
+          setUser(profile);
+        } else {
+          setUser(out.user);
+        }
+      } catch {
+        setUser(out.user);
+      }
     },
     async login(email, password) {
       const out = await api.login({ email, password });
       setToken(out.token);
       setUser(out.user);
     },
+    async refreshProfile() {
+      if (!token) return null;
+      const profile = await api.profile(token);
+      setUser(profile);
+      return profile;
+    },
+    setUser,
     logout() {
       setToken('');
       setUser(null);
     },
-  }), [token, user]);
+  }), [token, user, setUser]);
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }

@@ -29,11 +29,19 @@ export class MemoryStore {
       athlete: {
         weightKg: null,
         heightCm: null,
+        level: null,
       },
       city: null,
       location: null,
       rating: 1200,
       pir: 50,
+      onboarding: {
+        completed: false,
+        quizAnswers: null,
+      },
+      calibration: {
+        remainingMatches: 5,
+      },
       history: [],
       watch: {
         enabled: false,

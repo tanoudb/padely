@@ -22,6 +22,7 @@ export const api = {
   register: (body) => request('/api/v1/auth/register', { method: 'POST', body }),
   login: (body) => request('/api/v1/auth/login', { method: 'POST', body }),
   profile: (token) => request('/api/v1/profile', { token }),
+  completeOnboarding: (token, body) => request('/api/v1/profile/onboarding', { method: 'PUT', token, body }),
   updateAthlete: (token, body) => request('/api/v1/profile/athlete', { method: 'PUT', token, body }),
   createMatch: (token, body) => request('/api/v1/matches', { method: 'POST', token, body }),
   listMyMatches: (token, status) => request(`/api/v1/matches${status ? `?status=${encodeURIComponent(status)}` : ''}`, { token }),

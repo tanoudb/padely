@@ -45,8 +45,13 @@ export async function createMatch(payload, createdBy) {
   };
 
   const splitCost = Number((billing.totalCostEur / 4).toFixed(2));
+  const validationMode = payload.validationMode === 'rapide' ? 'rapide' : 'standard';
+  const requiredValidations = validationMode === 'standard' ? 3 : 1;
+  const pendingValidators = validationMode === 'standard'
+    ? allPlayers.filter((id) => id !== createdBy)
+    : allPlayers;
 
-  return store.createMatch({
+  const created = await store.createMatch({
     createdBy,
     teamA,
     teamB,
@@ -58,17 +63,37 @@ export async function createMatch(payload, createdBy) {
       splitCostEurPerPlayer: splitCost,
     },
     validation: {
-      required: 3,
+      required: requiredValidations,
       accepted: 0,
       rejected: 0,
-      pendingValidators: allPlayers.filter((id) => id !== createdBy),
+      pendingValidators,
     },
+    validationMode,
     rated: false,
     usersSnapshot: {
       teamA: usersA.map((u) => safeUser(u)),
       teamB: usersB.map((u) => safeUser(u)),
     },
   });
+
+  if (validationMode === 'rapide') {
+    await store.createValidation({ matchId: created.id, userId: createdBy, accepted: true });
+    const updated = await store.updateMatch(created.id, {
+      validation: {
+        ...created.validation,
+        accepted: 1,
+        rejected: 0,
+        pendingValidators: pendingValidators.filter((id) => id !== createdBy),
+      },
+    });
+
+    if (updated.validation.accepted >= updated.validation.required) {
+      return rateValidatedMatch(created.id);
+    }
+    return updated;
+  }
+
+  return created;
 }
 
 export async function validateMatch({ matchId, userId, accepted }) {
@@ -130,6 +155,7 @@ async function userToEnginePlayer(user, partnerId) {
     id: user.id,
     rating: user.rating,
     pairRating,
+    kFactor: (user.calibration?.remainingMatches ?? 0) > 0 ? 40 : 24,
     watch: {
       distanceKm: 0,
       calories: 0,
@@ -166,9 +192,13 @@ export async function rateValidatedMatch(matchId) {
 
   for (const update of [...result.teamA, ...result.teamB]) {
     const current = await store.getUserById(update.id);
+    const remainingCalibration = current.calibration?.remainingMatches ?? 0;
     await store.updateUser(update.id, {
       rating: update.newRating,
       pir: update.pir.pir,
+      calibration: {
+        remainingMatches: Math.max(0, remainingCalibration - 1),
+      },
       history: [
         ...(current.history ?? []),
         {

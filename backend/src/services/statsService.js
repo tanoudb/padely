@@ -20,6 +20,54 @@ function winnerTeam(match) {
   return a >= b ? 'A' : 'B';
 }
 
+function average(values) {
+  if (!values.length) {
+    return 0;
+  }
+  return values.reduce((s, v) => s + v, 0) / values.length;
+}
+
+function computeRegularityScore(matches) {
+  if (matches.length < 2) {
+    return 50;
+  }
+
+  const sorted = [...matches].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+  const gaps = [];
+  for (let i = 1; i < sorted.length; i += 1) {
+    const gapDays = (new Date(sorted[i].createdAt) - new Date(sorted[i - 1].createdAt)) / (1000 * 60 * 60 * 24);
+    gaps.push(gapDays);
+  }
+
+  const avgGap = average(gaps);
+  const score = 100 - Math.min(100, avgGap * 6);
+  return Math.round(score);
+}
+
+function computeConsistencyScore(matches, userId) {
+  if (!matches.length) {
+    return 0;
+  }
+
+  const performances = matches.map((match) => {
+    const isTeamA = match.teamA.includes(userId);
+    const won = (isTeamA && winnerTeam(match) === 'A') || (!isTeamA && winnerTeam(match) === 'B');
+
+    const gamesFor = match.sets.reduce((s, set) => s + (isTeamA ? set.a : set.b), 0);
+    const gamesAgainst = match.sets.reduce((s, set) => s + (isTeamA ? set.b : set.a), 0);
+    const gameDiff = gamesFor - gamesAgainst;
+
+    return (won ? 1 : 0) * 10 + gameDiff;
+  });
+
+  const mean = average(performances);
+  const variance = average(performances.map((p) => (p - mean) ** 2));
+  const stdDev = Math.sqrt(variance);
+
+  const score = 100 - Math.min(100, stdDev * 8);
+  return Math.round(score);
+}
+
 export async function getDashboard(userId) {
   const user = await store.getUserById(userId);
   if (!user) {
@@ -35,8 +83,9 @@ export async function getDashboard(userId) {
   }).length;
 
   const losses = matches.length - wins;
-  const calories = matches.length * 580;
-  const distanceKm = Number((matches.length * 2.4).toFixed(2));
+  const totalDistanceKm = Number((matches.length * 2.4).toFixed(2));
+  const averageDistanceKm = Number((matches.length ? totalDistanceKm / matches.length : 0).toFixed(2));
+  const calories = Math.round(matches.length * 580);
 
   return {
     userId,
@@ -47,7 +96,10 @@ export async function getDashboard(userId) {
     losses,
     playTimeMinutes: minutes,
     calories,
-    distanceKm,
+    totalDistanceKm,
+    averageDistanceKm,
+    consistencyScore: computeConsistencyScore(matches, userId),
+    regularityScore: computeRegularityScore(matches),
     progression: user.history ?? [],
   };
 }
@@ -67,17 +119,21 @@ export async function getDuoStats(userId) {
         partnerId: partner,
         matches: 0,
         wins: 0,
+        totalDistanceKm: 0,
       });
     }
 
     const item = duoMap.get(partner);
     item.matches += 1;
     item.wins += won ? 1 : 0;
+    item.totalDistanceKm += 2.4;
   }
 
   return [...duoMap.values()].map((item) => ({
     ...item,
     winRate: item.matches ? Number(((item.wins / item.matches) * 100).toFixed(1)) : 0,
+    averageDistanceKm: item.matches ? Number((item.totalDistanceKm / item.matches).toFixed(2)) : 0,
+    totalDistanceKm: Number(item.totalDistanceKm.toFixed(2)),
   }));
 }
 

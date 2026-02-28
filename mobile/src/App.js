@@ -4,9 +4,9 @@ import { StatusBar } from 'expo-status-bar';
 import { TabBar } from './components/TabBar';
 import { Backdrop } from './components/Backdrop';
 import { AuthScreen } from './screens/AuthScreen';
-import { CommunityScreen } from './screens/CommunityScreen';
 import { HomeScreen } from './screens/HomeScreen';
 import { PlayScreen } from './screens/PlayScreen';
+import { PartnersScreen } from './screens/PartnersScreen';
 import { StatsScreen } from './screens/StatsScreen';
 import { SessionProvider, useSession } from './state/session';
 import { theme } from './theme';
@@ -16,7 +16,11 @@ function Main() {
   const [tab, setTab] = useState('home');
 
   if (!token) {
-    return <AuthScreen />;
+    return (
+      <SafeAreaView style={styles.safe}>
+        <AuthScreen />
+      </SafeAreaView>
+    );
   }
 
   return (
@@ -25,7 +29,7 @@ function Main() {
       <View style={styles.content}>
         {tab === 'home' && <HomeScreen />}
         {tab === 'play' && <PlayScreen />}
-        {tab === 'community' && <CommunityScreen />}
+        {tab === 'partners' && <PartnersScreen />}
         {tab === 'stats' && <StatsScreen />}
       </View>
       <TabBar active={tab} onChange={setTab} />
