@@ -3,7 +3,9 @@ import {
   Animated,
   Easing,
   Modal,
+  Platform,
   Pressable,
+  SafeAreaView,
   ScrollView,
   StyleSheet,
   Switch,
@@ -49,43 +51,24 @@ function MatchCard({ match, onValidate }) {
   );
 }
 
-function Board({ score, setScore, landscape }) {
-  const displayPoints = getDisplayPoints(score);
-  const currentServer = getCurrentServer(score);
-
+function RefereeSide({ team, serving, point, games, onPress, pointSize, gameSize, titleSize }) {
+  const isRed = team === 'a';
   return (
-    <>
-      <View style={[styles.board, landscape && styles.boardLandscape]}>
-        <Pressable style={[styles.side, styles.redSide]} onPress={() => setScore((prev) => addPoint(prev, 'a'))}>
-          <Text style={styles.sideTitle}>Equipe Rouge {currentServer === 'a' ? '🎾' : ''}</Text>
-          <Text style={styles.bigPoint}>{displayPoints.a}</Text>
-          <Text style={styles.sideMeta}>Jeux: {score.currentSet.a}</Text>
-          <Text style={styles.sideHint}>Touchez pour +1 point</Text>
-        </Pressable>
-
-        <Pressable style={[styles.side, styles.blueSide]} onPress={() => setScore((prev) => addPoint(prev, 'b'))}>
-          <Text style={styles.sideTitle}>Equipe Bleue {currentServer === 'b' ? '🎾' : ''}</Text>
-          <Text style={styles.bigPoint}>{displayPoints.b}</Text>
-          <Text style={styles.sideMeta}>Jeux: {score.currentSet.b}</Text>
-          <Text style={styles.sideHint}>Touchez pour +1 point</Text>
-        </Pressable>
-      </View>
-
-      <Text style={styles.meta}>
-        {displayPoints.tieBreak ? 'Tie-break actif' : 'Jeu standard'} · Sets: {score.sets.map((set) => `${set.a}-${set.b}`).join(' / ') || 'aucun'}
+    <Pressable style={[styles.refSide, isRed ? styles.redSide : styles.blueSide]} onPress={onPress}>
+      <Text style={[styles.refSideTitle, { fontSize: titleSize }]}>
+        {isRed ? 'EQUIPE ROUGE' : 'EQUIPE BLEUE'} {serving ? '🎾' : ''}
       </Text>
-      {!!score.lastEvent && <Text style={styles.meta}>{score.lastEvent}</Text>}
-      {score.sideChangeAlert ? <Text style={styles.sideChange}>Changement de cote recommande (jeu impair).</Text> : null}
-
-      <View style={styles.row}>
-        <Pressable style={[styles.actionBtn, styles.undoBtn]} onPress={() => setScore((prev) => undoPoint(prev))}>
-          <Text style={styles.actionText}>Annuler dernier point</Text>
-        </Pressable>
-        <Pressable style={[styles.actionBtn, styles.resetBtn]} onPress={() => setScore(resetScore(score.config))}>
-          <Text style={styles.actionText}>Reinitialiser score</Text>
-        </Pressable>
-      </View>
-    </>
+      <Text
+        style={[styles.refPoint, { fontSize: pointSize, lineHeight: Math.round(pointSize * 1.08) }]}
+        adjustsFontSizeToFit
+        minimumFontScale={0.55}
+        numberOfLines={1}
+      >
+        {point}
+      </Text>
+      <Text style={[styles.refGames, { fontSize: gameSize }]}>Jeux: {games}</Text>
+      <Text style={styles.refTapHint}>Touchez pour marquer le point</Text>
+    </Pressable>
   );
 }
 
@@ -124,20 +107,22 @@ export function PlayScreen() {
   const [totalCost, setTotalCost] = useState('48');
   const [feedback, setFeedback] = useState('');
   const [matches, setMatches] = useState([]);
-  const [score, setScore] = useState(createScoreState({ puntoDeOro: false, thirdSetTieBreak: false, setsToWin: 2 }));
+  const [score, setScore] = useState(
+    createScoreState({
+      puntoDeOro: false,
+      setsToWin: 3,
+      noTieBreakInDecidingSet: true,
+    })
+  );
+  const [autoSideSwitch, setAutoSideSwitch] = useState(true);
   const [fullScreenMode, setFullScreenMode] = useState(false);
+  const [forceLandscapeLayout, setForceLandscapeLayout] = useState(true);
+  const [modalOrientation, setModalOrientation] = useState('unknown');
   const [savingAuto, setSavingAuto] = useState(false);
   const [savedMatchId, setSavedMatchId] = useState(null);
 
   const { width, height } = useWindowDimensions();
   const landscape = width > height;
-  const forcedLandscapeStyle = landscape
-    ? null
-    : {
-      width: Math.max(280, height - 32),
-      height: Math.max(220, width - 32),
-      transform: [{ rotate: '90deg' }],
-    };
   const cinematicAnim = useRef(new Animated.Value(0)).current;
 
   const selectablePlayers = useMemo(
@@ -145,6 +130,9 @@ export function PlayScreen() {
     [players, user.id]
   );
 
+  const displayPoints = getDisplayPoints(score);
+  const currentServer = getCurrentServer(score);
+  const oddGamesInCurrentSet = (score.currentSet.a + score.currentSet.b) % 2 === 1;
   const setsPayload = useMemo(() => scoreStateToSets(score), [score]);
   const winnerTone = useMemo(() => {
     if (!score.winner || setsPayload.length === 0) {
@@ -152,6 +140,8 @@ export function PlayScreen() {
     }
     return victoryTone(setsPayload, score.winner);
   }, [score.winner, setsPayload]);
+  const setsWonA = useMemo(() => score.sets.filter((set) => set.a > set.b).length, [score.sets]);
+  const setsWonB = useMemo(() => score.sets.filter((set) => set.b > set.a).length, [score.sets]);
 
   async function refresh() {
     const [playersOut, myMatches] = await Promise.all([
@@ -180,7 +170,7 @@ export function PlayScreen() {
         useNativeDriver: true,
       }),
       Animated.timing(cinematicAnim, {
-        toValue: 0.9,
+        toValue: 0.92,
         duration: 500,
         easing: Easing.inOut(Easing.quad),
         useNativeDriver: true,
@@ -284,6 +274,22 @@ export function PlayScreen() {
     setFeedback('Nouveau match pret.');
   }
 
+  const orientationIsLandscape = modalOrientation.includes('LANDSCAPE') || modalOrientation.includes('landscape');
+  const refereeLandscape = fullScreenMode ? (forceLandscapeLayout || landscape || orientationIsLandscape) : landscape;
+  const shortestSide = Math.min(width, height);
+  const pointSize = refereeLandscape
+    ? Math.max(80, Math.min(148, Math.round(shortestSide * 0.33)))
+    : Math.max(72, Math.min(118, Math.round(shortestSide * 0.25)));
+  const gameSize = refereeLandscape ? 24 : 20;
+  const titleSize = refereeLandscape ? 28 : 22;
+  const refereeLayoutStyle = refereeLandscape ? styles.refBoardLandscape : styles.refBoardPortrait;
+  const shouldSwapSides = autoSideSwitch && oddGamesInCurrentSet;
+  const slotA = shouldSwapSides ? 'b' : 'a';
+  const slotB = shouldSwapSides ? 'a' : 'b';
+
+  const slotPoint = (team) => (team === 'a' ? displayPoints.a : displayPoints.b);
+  const slotGames = (team) => (team === 'a' ? score.currentSet.a : score.currentSet.b);
+
   return (
     <>
       <ScrollView style={styles.root} contentContainerStyle={styles.content}>
@@ -322,8 +328,19 @@ export function PlayScreen() {
               thumbColor={score.config.puntoDeOro ? '#F4D35E' : '#DFEAF1'}
             />
           </View>
+          <View style={styles.optionRow}>
+            <Text style={styles.optionLabel}>Changement de cote auto (jeux impairs)</Text>
+            <Switch
+              value={autoSideSwitch}
+              onValueChange={setAutoSideSwitch}
+              trackColor={{ false: '#29495F', true: '#2E6F5E' }}
+              thumbColor={autoSideSwitch ? '#00D1B2' : '#DFEAF1'}
+            />
+          </View>
           <Text style={styles.meta}>Punto de Oro: a 40-40, le point suivant gagne le jeu.</Text>
-          <Text style={styles.meta}>Set: 6 jeux, 2 d ecart. Tie-break a 6-6 (sets 1-2). 3e set sans tie-break.</Text>
+          <Text style={styles.meta}>
+            Format long: 3 sets gagnants. Set a 6 jeux, 2 d ecart. Tie-break a 6-6 sauf set decisif.
+          </Text>
 
           <View style={styles.optionRow}>
             <Text style={styles.optionLabel}>Serveur initial</Text>
@@ -346,8 +363,6 @@ export function PlayScreen() {
           <Pressable style={styles.fullBtn} onPress={() => setFullScreenMode(true)}>
             <Text style={styles.fullBtnText}>Mode arbitre plein ecran</Text>
           </Pressable>
-
-          <Board score={score} setScore={setScore} landscape={landscape} />
         </Card>
 
         <Card>
@@ -374,21 +389,80 @@ export function PlayScreen() {
         </Card>
       </ScrollView>
 
-      <Modal visible={fullScreenMode} animationType="slide" presentationStyle="fullScreen">
-        <View style={styles.fullRoot}>
+      <Modal
+        visible={fullScreenMode}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        supportedOrientations={Platform.OS === 'ios'
+          ? ['portrait', 'landscape-left', 'landscape-right']
+          : ['portrait', 'landscape']}
+        onOrientationChange={(event) => {
+          const nextOrientation = event?.nativeEvent?.orientation;
+          if (nextOrientation) {
+            setModalOrientation(nextOrientation);
+          }
+        }}
+      >
+        <SafeAreaView style={styles.fullRoot}>
           <View style={styles.fullTop}>
             <Text style={styles.fullTitle}>Mode arbitre</Text>
             <Pressable style={styles.fullClose} onPress={() => setFullScreenMode(false)}>
               <Text style={styles.fullCloseText}>Fermer</Text>
             </Pressable>
           </View>
-          {!landscape ? <Text style={styles.rotateHint}>Mode paysage force active.</Text> : null}
-          <View style={styles.fullBoardWrap}>
-            <View style={[styles.fullBoardCard, forcedLandscapeStyle]}>
-              <Board score={score} setScore={setScore} landscape />
-            </View>
+
+          <View style={styles.refControlsRow}>
+            <Text style={styles.refControlsLabel}>Forcer affichage paysage</Text>
+            <Switch
+              value={forceLandscapeLayout}
+              onValueChange={setForceLandscapeLayout}
+              trackColor={{ false: '#29495F', true: '#2F7B66' }}
+              thumbColor={forceLandscapeLayout ? '#8BF2CF' : '#DFEAF1'}
+            />
           </View>
-        </View>
+
+          <View style={[styles.refInfoRow, !refereeLandscape && styles.refInfoRowPortrait]}>
+            <Text style={styles.refInfoText}>{displayPoints.tieBreak ? 'Tie-break actif (7 pts, 2 d ecart)' : 'Jeu standard (15-30-40-AV)'}</Text>
+            <Text style={styles.refInfoText}>Sets: {score.sets.map((set) => `${set.a}-${set.b}`).join(' / ') || 'aucun'}</Text>
+            <Text style={styles.refInfoText}>
+              Service: {currentServer === 'a' ? 'Rouge' : 'Bleue'} · Sets gagnes {setsWonA}-{setsWonB} (objectif 3)
+            </Text>
+          </View>
+
+          {score.sideChangeAlert ? <Text style={styles.sideChange}>Changement de cote recommande.</Text> : null}
+
+          <View style={[styles.refBoard, refereeLayoutStyle]}>
+            <RefereeSide
+              team={slotA}
+              serving={currentServer === slotA}
+              point={slotPoint(slotA)}
+              games={slotGames(slotA)}
+              onPress={() => setScore((prev) => addPoint(prev, slotA))}
+              pointSize={pointSize}
+              gameSize={gameSize}
+              titleSize={titleSize}
+            />
+            <RefereeSide
+              team={slotB}
+              serving={currentServer === slotB}
+              point={slotPoint(slotB)}
+              games={slotGames(slotB)}
+              onPress={() => setScore((prev) => addPoint(prev, slotB))}
+              pointSize={pointSize}
+              gameSize={gameSize}
+              titleSize={titleSize}
+            />
+          </View>
+
+          <View style={styles.refActions}>
+            <Pressable style={[styles.actionBtn, styles.undoBtn]} onPress={() => setScore((prev) => undoPoint(prev))}>
+              <Text style={styles.actionText}>Annuler dernier point</Text>
+            </Pressable>
+            <Pressable style={[styles.actionBtn, styles.resetBtn]} onPress={() => setScore(resetScore(score.config))}>
+              <Text style={styles.actionText}>Reinitialiser score</Text>
+            </Pressable>
+          </View>
+        </SafeAreaView>
       </Modal>
 
       <Modal visible={Boolean(score.winner)} transparent animationType="fade">
@@ -422,18 +496,8 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: 'transparent' },
   content: { padding: 16, gap: 12, paddingBottom: 24 },
   header: { marginBottom: 4 },
-  eyebrow: {
-    color: theme.colors.accent2,
-    fontFamily: theme.fonts.mono,
-    letterSpacing: 1,
-    fontSize: 11,
-  },
-  h1: {
-    color: theme.colors.text,
-    fontSize: 40,
-    lineHeight: 42,
-    fontFamily: theme.fonts.display,
-  },
+  eyebrow: { color: theme.colors.accent2, fontFamily: theme.fonts.mono, letterSpacing: 1, fontSize: 11 },
+  h1: { color: theme.colors.text, fontSize: 40, lineHeight: 42, fontFamily: theme.fonts.display },
   sectionTitle: { color: theme.colors.text, fontFamily: theme.fonts.title, marginBottom: 8, fontSize: 16 },
   label: { color: theme.colors.muted, marginBottom: 4, marginTop: 4, fontFamily: theme.fonts.body },
   meta: { color: theme.colors.muted, marginBottom: 6, fontFamily: theme.fonts.body },
@@ -449,12 +513,7 @@ const styles = StyleSheet.create({
   playerChipActive: { backgroundColor: theme.colors.accent, borderColor: theme.colors.accent },
   playerText: { color: theme.colors.text, fontFamily: theme.fonts.title, fontSize: 12 },
   playerTextActive: { color: '#3A2500' },
-  optionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 10,
-  },
+  optionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
   optionLabel: { color: theme.colors.text, fontFamily: theme.fonts.title, fontSize: 14 },
   serverBtn: {
     minHeight: 32,
@@ -476,18 +535,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#355B71',
-    marginBottom: 8,
+    marginBottom: 4,
   },
   fullBtnText: { color: '#F0F7FF', fontFamily: theme.fonts.title, fontSize: 12, textTransform: 'uppercase' },
-  board: { flexDirection: 'column', gap: 10, marginBottom: 8 },
-  boardLandscape: { flexDirection: 'row' },
-  side: { flex: 1, minHeight: 170, borderRadius: 16, padding: 14, justifyContent: 'space-between' },
-  redSide: { backgroundColor: '#7F1D1D', borderWidth: 1, borderColor: '#E16A6A' },
-  blueSide: { backgroundColor: '#1E3A8A', borderWidth: 1, borderColor: '#7FA4FF' },
-  sideTitle: { color: '#F8FBFF', fontFamily: theme.fonts.title, textTransform: 'uppercase', fontSize: 13, letterSpacing: 1 },
-  bigPoint: { color: '#FFFFFF', fontFamily: theme.fonts.display, fontSize: 72, lineHeight: 72, textAlign: 'center' },
-  sideMeta: { color: '#E2E8F0', fontFamily: theme.fonts.title, fontSize: 14, textAlign: 'center' },
-  sideHint: { color: '#CBD5E1', fontFamily: theme.fonts.body, fontSize: 11, textAlign: 'center' },
   input: {
     minHeight: 52,
     borderRadius: 12,
@@ -502,14 +552,7 @@ const styles = StyleSheet.create({
   ctaText: { color: '#3A2500', fontFamily: theme.fonts.title, textTransform: 'uppercase', letterSpacing: 1, fontSize: 12 },
   feedback: { color: theme.colors.warning, fontFamily: theme.fonts.title },
   row: { flexDirection: 'row', gap: 8 },
-  actionBtn: {
-    flex: 1,
-    minHeight: 46,
-    borderRadius: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 8,
-  },
+  actionBtn: { flex: 1, minHeight: 46, borderRadius: 10, justifyContent: 'center', alignItems: 'center', marginTop: 8 },
   undoBtn: { backgroundColor: '#4C687B' },
   resetBtn: { backgroundColor: '#365A73' },
   accept: { backgroundColor: theme.colors.accent },
@@ -525,15 +568,54 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.bgAlt,
   },
   matchTitle: { color: theme.colors.text, fontFamily: theme.fonts.title, marginBottom: 4 },
-  sideChange: { color: theme.colors.warning, fontFamily: theme.fonts.title, marginBottom: 6 },
-  fullRoot: { flex: 1, backgroundColor: '#07141F', padding: 16 },
-  fullTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-  fullTitle: { color: '#F0F7FF', fontFamily: theme.fonts.title, fontSize: 18 },
+
+  fullRoot: { flex: 1, backgroundColor: '#07141F', padding: 10 },
+  fullTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
+  fullTitle: { color: '#F0F7FF', fontFamily: theme.fonts.title, fontSize: 20 },
   fullClose: { paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10, backgroundColor: '#2E4E62' },
   fullCloseText: { color: '#F0F7FF', fontFamily: theme.fonts.title },
-  fullBoardWrap: { flex: 1, justifyContent: 'center' },
-  fullBoardCard: { width: '100%' },
-  rotateHint: { color: theme.colors.warning, fontFamily: theme.fonts.title, textAlign: 'center', marginBottom: 6 },
+  refControlsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#102331',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    marginBottom: 8,
+  },
+  refControlsLabel: { color: '#D4E2ED', fontFamily: theme.fonts.title, fontSize: 13 },
+  refInfoRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6, gap: 10 },
+  refInfoRowPortrait: { flexDirection: 'column', alignItems: 'center', marginBottom: 10 },
+  refInfoText: { color: '#D4E2ED', fontFamily: theme.fonts.title, fontSize: 14, textAlign: 'center' },
+  sideChange: { color: theme.colors.warning, fontFamily: theme.fonts.title, marginBottom: 6, textAlign: 'center' },
+
+  refBoard: { flex: 1, gap: 8 },
+  refBoardPortrait: { flexDirection: 'column' },
+  refBoardLandscape: { flexDirection: 'row' },
+  refSide: { flex: 1, borderRadius: 18, borderWidth: 1, padding: 16, justifyContent: 'space-between' },
+  redSide: { backgroundColor: '#8F1D24', borderColor: '#E16A6A' },
+  blueSide: { backgroundColor: '#27429A', borderColor: '#7FA4FF' },
+  refSideTitle: {
+    color: '#F8FBFF',
+    fontFamily: theme.fonts.title,
+    textTransform: 'uppercase',
+    fontSize: 18,
+    letterSpacing: 1,
+    textAlign: 'center',
+  },
+  refPoint: {
+    color: '#FFFFFF',
+    fontFamily: theme.fonts.title,
+    fontSize: 120,
+    lineHeight: 126,
+    textAlign: 'center',
+    includeFontPadding: false,
+  },
+  refGames: { color: '#E2E8F0', fontFamily: theme.fonts.title, fontSize: 24, textAlign: 'center' },
+  refTapHint: { color: '#C8D6E3', fontFamily: theme.fonts.body, fontSize: 14, textAlign: 'center' },
+  refActions: { flexDirection: 'row', gap: 10, marginTop: 8 },
+
   cinematicBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(5, 11, 19, 0.86)',
@@ -563,10 +645,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  cinematicBtnText: {
-    color: '#3A2500',
-    fontFamily: theme.fonts.title,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-  },
+  cinematicBtnText: { color: '#3A2500', fontFamily: theme.fonts.title, textTransform: 'uppercase', letterSpacing: 1 },
 });

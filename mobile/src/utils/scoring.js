@@ -13,8 +13,8 @@ function opposite(side) {
 }
 
 function shouldUseTieBreak(setIndex, config) {
-  const isThirdSet = setIndex >= 2;
-  if (isThirdSet && !config.thirdSetTieBreak) {
+  const decidingSetIndex = (config.setsToWin * 2) - 2;
+  if (config.noTieBreakInDecidingSet && setIndex === decidingSetIndex) {
     return false;
   }
   return true;
@@ -25,8 +25,8 @@ export function createScoreState(config = {}) {
     config: {
       puntoDeOro: Boolean(config.puntoDeOro),
       tieBreakPoints: config.tieBreakPoints ?? 7,
-      thirdSetTieBreak: config.thirdSetTieBreak ?? false,
-      setsToWin: config.setsToWin ?? 2,
+      setsToWin: config.setsToWin ?? 3,
+      noTieBreakInDecidingSet: config.noTieBreakInDecidingSet ?? true,
     },
     sets: [],
     currentSet: { a: 0, b: 0 },
@@ -49,13 +49,19 @@ function countSetsWon(sets, side) {
   return sets.filter((set) => (side === 'a' ? set.a > set.b : set.b > set.a)).length;
 }
 
-function evaluateMatchEnd(state, side) {
+function evaluateMatchEnd(state) {
   const setsWonA = countSetsWon(state.sets, 'a');
   const setsWonB = countSetsWon(state.sets, 'b');
-  const target = state.config.setsToWin ?? 2;
-  if (setsWonA >= target || setsWonB >= target) {
-    state.winner = side;
-    state.lastEvent = side === 'a' ? 'Victoire equipe rouge' : 'Victoire equipe bleue';
+  const target = state.config.setsToWin ?? 3;
+  if (setsWonA >= target) {
+    state.winner = 'a';
+    state.lastEvent = 'Victoire equipe rouge';
+    return;
+  }
+
+  if (setsWonB >= target) {
+    state.winner = 'b';
+    state.lastEvent = 'Victoire equipe bleue';
   }
 }
 
@@ -66,9 +72,9 @@ function startNextSet(state) {
   state.sideChangeAlert = false;
 }
 
-function finalizeSet(state, side) {
+function finalizeSet(state) {
   state.sets.push({ a: state.currentSet.a, b: state.currentSet.b });
-  evaluateMatchEnd(state, side);
+  evaluateMatchEnd(state);
   if (!state.winner) {
     startNextSet(state);
   }
@@ -85,7 +91,7 @@ function shouldWinGame(pointsA, pointsB, puntoDeOro) {
   return (pointsA >= 4 || pointsB >= 4) && Math.abs(pointsA - pointsB) >= 2;
 }
 
-function maybeSetEnd(state, side) {
+function maybeSetEnd(state) {
   const ga = state.currentSet.a;
   const gb = state.currentSet.b;
   const diff = Math.abs(ga - gb);
@@ -102,7 +108,7 @@ function maybeSetEnd(state, side) {
     }
 
     if (diff >= 2 && (ga >= 6 || gb >= 6)) {
-      finalizeSet(state, side);
+      finalizeSet(state);
       return;
     }
   }
@@ -121,7 +127,7 @@ function winGame(state, side) {
   state.points = { a: 0, b: 0 };
   state.server = opposite(state.server);
   state.lastEvent = `Jeu equipe ${side === 'a' ? 'rouge' : 'bleue'}`;
-  maybeSetEnd(state, side);
+  maybeSetEnd(state);
 }
 
 function tieBreakServer(firstServer, totalPointsPlayed) {
@@ -153,7 +159,7 @@ function winTieBreakPoint(state, side) {
 
     // After tie-break set, next set starts with opposite server of tie-break opener.
     state.server = opposite(state.tieBreak.firstServer);
-    finalizeSet(state, side);
+    finalizeSet(state);
   }
 }
 
@@ -261,6 +267,10 @@ export function getCurrentServer(state) {
 
 export function scoreStateToSets(state) {
   const out = [...state.sets];
+  if (state.winner) {
+    return out;
+  }
+
   if (state.currentSet.a > 0 || state.currentSet.b > 0) {
     out.push({ a: state.currentSet.a, b: state.currentSet.b });
   }

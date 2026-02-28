@@ -1,5 +1,14 @@
 import React, { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { Card } from '../components/Card';
 import { Backdrop } from '../components/Backdrop';
 import { useSession } from '../state/session';
@@ -76,91 +85,99 @@ export function AuthScreen() {
   return (
     <View style={styles.root}>
       <Backdrop />
-      <View style={styles.hero}>
-        <Text style={styles.kicker}>SYSTEME D IMPACT PADEL</Text>
-        <Text style={styles.title}>PADELY</Text>
-        <Text style={styles.subtitle}>Ton niveau n est plus un chiffre. C est un ADN.</Text>
-      </View>
+      <KeyboardAvoidingView style={styles.keyboard} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.hero}>
+            <Text style={styles.kicker}>SYSTEME D IMPACT PADEL</Text>
+            <Text style={styles.title}>PADELY</Text>
+            <Text style={styles.subtitle}>Ton niveau n est plus un chiffre. C est un ADN.</Text>
+          </View>
 
-      <Card style={styles.form} elevated>
-        <View style={styles.switch}>
-          <Pressable style={[styles.switchBtn, !isRegister && styles.switchBtnActive]} onPress={() => setIsRegister(false)}>
-            <Text style={[styles.switchLabel, !isRegister && styles.switchLabelActive]}>Connexion</Text>
-          </Pressable>
-          <Pressable style={[styles.switchBtn, isRegister && styles.switchBtnActive]} onPress={() => setIsRegister(true)}>
-            <Text style={[styles.switchLabel, isRegister && styles.switchLabelActive]}>Inscription</Text>
-          </Pressable>
-        </View>
-
-        <TextInput value={email} onChangeText={setEmail} autoCapitalize="none" style={styles.input} placeholder="Email" placeholderTextColor={theme.colors.muted} />
-        <TextInput value={password} onChangeText={setPassword} secureTextEntry style={styles.input} placeholder="Mot de passe" placeholderTextColor={theme.colors.muted} />
-
-        {isRegister ? (
-          <>
-            <TextInput value={displayName} onChangeText={setDisplayName} style={styles.input} placeholder="Nom affiche" placeholderTextColor={theme.colors.muted} />
-
-            <View style={styles.optionRow}>
-              <Text style={styles.optionLabel}>Je ne connais pas mon niveau</Text>
-              <Pressable
-                style={[styles.smallToggle, unknownLevel && styles.smallToggleActive]}
-                onPress={() => setUnknownLevel((v) => !v)}
-              >
-                <Text style={[styles.smallToggleText, unknownLevel && styles.smallToggleTextActive]}>{unknownLevel ? 'Oui' : 'Non'}</Text>
+          <Card style={styles.form} elevated>
+            <View style={styles.switch}>
+              <Pressable style={[styles.switchBtn, !isRegister && styles.switchBtnActive]} onPress={() => setIsRegister(false)}>
+                <Text style={[styles.switchLabel, !isRegister && styles.switchLabelActive]}>Connexion</Text>
+              </Pressable>
+              <Pressable style={[styles.switchBtn, isRegister && styles.switchBtnActive]} onPress={() => setIsRegister(true)}>
+                <Text style={[styles.switchLabel, isRegister && styles.switchLabelActive]}>Inscription</Text>
               </Pressable>
             </View>
 
-            {!unknownLevel ? (
+            <TextInput value={email} onChangeText={setEmail} autoCapitalize="none" style={styles.input} placeholder="Email" placeholderTextColor={theme.colors.muted} />
+            <TextInput value={password} onChangeText={setPassword} secureTextEntry style={styles.input} placeholder="Mot de passe" placeholderTextColor={theme.colors.muted} />
+
+            {isRegister ? (
               <>
-                <Text style={styles.cardLabel}>Niveau (1 a 8)</Text>
-                <View style={styles.levelGrid}>
-                  {[1, 2, 3, 4, 5, 6, 7, 8].map((value) => (
-                    <Pressable
-                      key={String(value)}
-                      style={[styles.levelChip, value === level && styles.levelChipActive]}
-                      onPress={() => setLevel(value)}
-                    >
-                      <Text style={[styles.levelText, value === level && styles.levelTextActive]}>{value}</Text>
-                    </Pressable>
-                  ))}
+                <TextInput value={displayName} onChangeText={setDisplayName} style={styles.input} placeholder="Nom affiche" placeholderTextColor={theme.colors.muted} />
+
+                <View style={styles.optionRow}>
+                  <Text style={styles.optionLabel}>Je ne connais pas mon niveau</Text>
+                  <Pressable
+                    style={[styles.smallToggle, unknownLevel && styles.smallToggleActive]}
+                    onPress={() => setUnknownLevel((v) => !v)}
+                  >
+                    <Text style={[styles.smallToggleText, unknownLevel && styles.smallToggleTextActive]}>{unknownLevel ? 'Oui' : 'Non'}</Text>
+                  </Pressable>
                 </View>
-                <Text style={styles.hint}>{LEVEL_DESCRIPTIONS[level]}</Text>
-              </>
-            ) : (
-              <>
-                <Text style={styles.cardLabel}>Quiz d auto-evaluation (1 a 5)</Text>
-                {QUIZ.map((q) => (
-                  <View key={q.key} style={styles.quizRow}>
-                    <Text style={styles.quizLabel}>{q.label}</Text>
-                    <View style={styles.quizOptions}>
-                      {[1, 2, 3, 4, 5].map((value) => {
-                        const active = Number(quizAnswers[q.key]) === value;
-                        return (
-                          <Pressable
-                            key={`${q.key}-${value}`}
-                            style={[styles.quizChip, active && styles.quizChipActive]}
-                            onPress={() => setQuizAnswers((prev) => ({ ...prev, [q.key]: value }))}
-                          >
-                            <Text style={[styles.quizChipText, active && styles.quizChipTextActive]}>{value}</Text>
-                          </Pressable>
-                        );
-                      })}
+
+                {!unknownLevel ? (
+                  <>
+                    <Text style={styles.cardLabel}>Niveau (1 a 8)</Text>
+                    <View style={styles.levelGrid}>
+                      {[1, 2, 3, 4, 5, 6, 7, 8].map((value) => (
+                        <Pressable
+                          key={String(value)}
+                          style={[styles.levelChip, value === level && styles.levelChipActive]}
+                          onPress={() => setLevel(value)}
+                        >
+                          <Text style={[styles.levelText, value === level && styles.levelTextActive]}>{value}</Text>
+                        </Pressable>
+                      ))}
                     </View>
-                  </View>
-                ))}
-                <Text style={styles.hint}>Niveau estime: {inferLevelFromQuiz(quizAnswers)} / 8</Text>
+                    <Text style={styles.hint}>{LEVEL_DESCRIPTIONS[level]}</Text>
+                  </>
+                ) : (
+                  <>
+                    <Text style={styles.cardLabel}>Quiz d auto-evaluation (1 a 5)</Text>
+                    {QUIZ.map((q) => (
+                      <View key={q.key} style={styles.quizRow}>
+                        <Text style={styles.quizLabel}>{q.label}</Text>
+                        <View style={styles.quizOptions}>
+                          {[1, 2, 3, 4, 5].map((value) => {
+                            const active = Number(quizAnswers[q.key]) === value;
+                            return (
+                              <Pressable
+                                key={`${q.key}-${value}`}
+                                style={[styles.quizChip, active && styles.quizChipActive]}
+                                onPress={() => setQuizAnswers((prev) => ({ ...prev, [q.key]: value }))}
+                              >
+                                <Text style={[styles.quizChipText, active && styles.quizChipTextActive]}>{value}</Text>
+                              </Pressable>
+                            );
+                          })}
+                        </View>
+                      </View>
+                    ))}
+                    <Text style={styles.hint}>Niveau estime: {inferLevelFromQuiz(quizAnswers)} / 8</Text>
+                  </>
+                )}
               </>
-            )}
-          </>
-        ) : null}
+            ) : null}
 
-        {error ? <Text style={styles.error}>{error}</Text> : null}
+            {error ? <Text style={styles.error}>{error}</Text> : null}
 
-        <Pressable style={styles.cta} onPress={submit}>
-          <Text style={styles.ctaLabel}>{isRegister ? 'Creer mon profil' : 'Entrer dans l espace de jeu'}</Text>
-        </Pressable>
+            <Pressable style={styles.cta} onPress={submit}>
+              <Text style={styles.ctaLabel}>{isRegister ? 'Creer mon profil' : 'Entrer dans l espace de jeu'}</Text>
+            </Pressable>
 
-        <Text style={styles.hint}>Compte test: alice@padely.app / padely2026</Text>
-      </Card>
+            <Text style={styles.hint}>Compte test: alice@padely.app / padely2026</Text>
+          </Card>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 }
@@ -169,8 +186,14 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: theme.colors.bg,
-    padding: 20,
+  },
+  keyboard: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
     justifyContent: 'center',
+    padding: 20,
     gap: 14,
   },
   hero: {

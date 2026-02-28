@@ -3,7 +3,7 @@
     "name": "Padely",
     "slug": "padely",
     "version": "0.1.0",
-    "orientation": "default",
+    "orientation": "all",
     "userInterfaceStyle": "dark",
     "splash": {
       "resizeMode": "contain",
