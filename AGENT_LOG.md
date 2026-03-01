@@ -56,3 +56,16 @@ Priorite sur le moteur PIR backend (valeur visible immediate pour la progression
 1. Migrer les ecrans legacy restants vers `palette.*` (supprimer `theme.colors.*` dans JSX/styles dynamiques).
 2. Introduire stats periode + head-to-head (endpoints + payload dashboard enrichi).
 3. Ajouter validation `zod` sur endpoints match/auth critiques.
+
+## [2026-03-02] — Run #02
+### Mission
+NOTIFICATIONS PUSH TEMPS RÉEL
+### Résultat
+Les joueurs reçoivent maintenant des notifications push réelles quand un match est créé contre eux, quand un score est validé/rejeté, quand une invitation est générée, et quand le classement de leur ville bouge.
+Sur mobile, le token Expo est enregistré automatiquement après login, les notifications ouvrent directement l’écran concerné (match ou conversation), et l’onglet Communauté affiche un badge de notifications non lues.
+### Technique
+`backend/src/services/pushService.js` (stockage token + envoi via expo-server-sdk avec fallback), `backend/src/services/profileService.js` + `backend/src/server.js` (PUT `/api/v1/profile/push-token`), `backend/src/services/matchService.js` (triggers push sur create/validate/reject/invite + mouvement leaderboard ville), `backend/src/store/memoryStore.js` et `backend/src/store/firestoreStore.js` (champ `pushTokens`), `backend/test/pushNotifications.test.js` (flux end-to-end push), `mobile/src/utils/pushRealtime.js`, `mobile/src/App.js`, `mobile/src/api/client.js`, `mobile/src/screens/play/PlaySetupScreen.js`, `mobile/src/screens/CommunityScreen.js`.
+### Statut
+✅
+### Prochaine mission recommandée
+WEBSOCKET / SSE LIVE SCORING

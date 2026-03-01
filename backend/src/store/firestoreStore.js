@@ -113,6 +113,7 @@ export class FirestoreStore {
       watch: {
         enabled: false,
       },
+      pushTokens: [],
     };
 
     await this.users().doc(id).set(user);

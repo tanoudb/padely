@@ -45,6 +45,7 @@ import {
 import {
   completeOnboarding,
   getProfile,
+  updatePushToken,
   updateAthleteProfile,
   updateUserSettings,
 } from './services/profileService.js';
@@ -201,6 +202,12 @@ const server = http.createServer(async (req, res) => {
       const me = await requireAuth(req);
       const payload = await readJson(req);
       return json(res, 200, await updateUserSettings(me.id, payload));
+    }
+
+    if (req.method === 'PUT' && url.pathname === '/api/v1/profile/push-token') {
+      const me = await requireAuth(req);
+      const payload = await readJson(req);
+      return json(res, 200, await updatePushToken(me.id, payload));
     }
 
     if (req.method === 'POST' && url.pathname === '/api/v1/matches') {

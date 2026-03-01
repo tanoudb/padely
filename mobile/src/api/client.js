@@ -45,6 +45,7 @@ export const api = {
   completeOnboarding: (token, body) => request('/api/v1/profile/onboarding', { method: 'PUT', token, body }),
   updateAthlete: (token, body) => request('/api/v1/profile/athlete', { method: 'PUT', token, body }),
   updateSettings: (token, body) => request('/api/v1/profile/settings', { method: 'PUT', token, body }),
+  updatePushToken: (token, body) => request('/api/v1/profile/push-token', { method: 'PUT', token, body }),
   createMatch: (token, body) => request('/api/v1/matches', { method: 'POST', token, body }),
   listMyMatches: (token, status) => request(`/api/v1/matches${status ? `?status=${encodeURIComponent(status)}` : ''}`, { token }),
   validateMatch: (token, matchId, accepted) => request(`/api/v1/matches/${matchId}/validate`, { method: 'POST', token, body: { accepted } }),

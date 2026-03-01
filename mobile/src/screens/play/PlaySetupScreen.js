@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { Card } from '../../components/Card';
 import { api } from '../../api/client';
 import { useSession } from '../../state/session';
@@ -13,6 +13,7 @@ function userChipLabel(player) {
 
 export function PlaySetupScreen() {
   const navigation = useNavigation();
+  const route = useRoute();
   const { token, user } = useSession();
   const { palette } = useUi();
 
@@ -25,12 +26,32 @@ export function PlaySetupScreen() {
   const [pointRule, setPointRule] = useState(user.settings?.pointRule ?? 'punto_de_oro');
   const [totalCost, setTotalCost] = useState('48');
   const [feedback, setFeedback] = useState('');
+  const [highlightedMatch, setHighlightedMatch] = useState(null);
+
+  const highlightedMatchId = route.params?.matchId ? String(route.params.matchId) : null;
 
   useEffect(() => {
     api.listPlayers(token)
       .then((out) => setPlayers(out.filter((p) => p.id !== user.id)))
       .catch((e) => setFeedback(e.message));
   }, [token, user.id]);
+
+  useEffect(() => {
+    if (!highlightedMatchId) {
+      setHighlightedMatch(null);
+      return;
+    }
+
+    api.listMyMatches(token)
+      .then((matches) => {
+        const found = matches.find((match) => match.id === highlightedMatchId) ?? null;
+        setHighlightedMatch(found);
+        if (!found) {
+          setFeedback('Match cible introuvable dans ton historique.');
+        }
+      })
+      .catch(() => {});
+  }, [highlightedMatchId, token]);
 
   const selectedSlots = useMemo(() => ([
     ...selectedUsers,
@@ -126,6 +147,15 @@ export function PlaySetupScreen() {
         <Text style={[styles.title, { color: palette.text }]}>MATCH</Text>
         <Text style={[styles.pitch, { color: palette.textSecondary ?? palette.muted }]}>Configure ton match, puis lance le scoring live.</Text>
       </View>
+
+      {highlightedMatch ? (
+        <Card elevated>
+          <Text style={[styles.section, { color: palette.textSecondary ?? palette.muted }]}>MATCH CIBLE</Text>
+          <Text style={[styles.meta, { color: palette.text }]}>ID: {highlightedMatch.id}</Text>
+          <Text style={[styles.meta, { color: palette.text }]}>Statut: {highlightedMatch.status}</Text>
+          <Text style={[styles.meta, { color: palette.text }]}>Score: {(highlightedMatch.sets ?? []).map((set) => `${set.a}-${set.b}`).join(' / ') || 'N/A'}</Text>
+        </Card>
+      ) : null}
 
       <Card elevated>
         <Text style={[styles.section, { color: palette.textSecondary ?? palette.muted }]}>MODE</Text>

@@ -1,4 +1,5 @@
 import { store } from '../store/index.js';
+import { upsertUserPushToken } from './pushService.js';
 
 function ratingFromLevel(level) {
   if (level <= 2) return 800;
@@ -108,4 +109,12 @@ export async function getProfile(userId) {
 
   const { passwordHash, ...safe } = user;
   return safe;
+}
+
+export async function updatePushToken(userId, payload) {
+  const result = await upsertUserPushToken(userId, payload);
+  return {
+    ok: true,
+    ...result,
+  };
 }

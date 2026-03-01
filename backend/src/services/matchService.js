@@ -3,6 +3,8 @@ import { computeFormIndex } from '../domain/pir.js';
 import { store } from '../store/index.js';
 import { newToken } from '../utils/security.js';
 import { newId } from '../utils/id.js';
+import { refreshCityLeaderboard } from './communityService.js';
+import { sendPushToUsers } from './pushService.js';
 
 function pairKey(team) {
   return [...team].sort().join(':');
@@ -90,6 +92,12 @@ function normalizeTeams(teamAInput, teamBInput) {
   return { teamA, teamB };
 }
 
+function userIdsFromSlots(slots = []) {
+  return slots
+    .filter((slot) => slot?.kind === 'user' && slot?.userId)
+    .map((slot) => slot.userId);
+}
+
 function extractUserIds(teamA, teamB) {
   return [...teamA, ...teamB].filter((p) => p.kind === 'user').map((p) => p.userId);
 }
@@ -165,6 +173,106 @@ function userTeamContains(match, userId) {
   return (match.players ?? []).includes(userId)
     || (match.teamA ?? []).includes(userId)
     || (match.teamB ?? []).includes(userId);
+}
+
+function leaderboardMoved(previousRows = [], nextRows = []) {
+  const prevTop = previousRows.slice(0, 10).map((item) => item.userId);
+  const nextTop = nextRows.slice(0, 10).map((item) => item.userId);
+  if (prevTop.length !== nextTop.length) {
+    return true;
+  }
+  return nextTop.some((userId, index) => userId !== prevTop[index]);
+}
+
+async function notifyMatchCreated(createdMatch) {
+  const teamA = createdMatch.participants?.teamA ?? [];
+  const teamB = createdMatch.participants?.teamB ?? [];
+  const creatorInTeamA = teamA.some((slot) => slot?.kind === 'user' && slot?.userId === createdMatch.createdBy);
+  const opponents = creatorInTeamA ? userIdsFromSlots(teamB) : userIdsFromSlots(teamA);
+
+  if (!opponents.length) {
+    return;
+  }
+
+  await sendPushToUsers(opponents, {
+    title: 'Nouveau match Padely',
+    body: 'Un adversaire a enregistre un match contre toi.',
+    data: {
+      type: 'match_created',
+      matchId: createdMatch.id,
+      createdBy: createdMatch.createdBy,
+    },
+  });
+}
+
+async function notifyMatchStatus(match, { accepted, actorUserId }) {
+  const targets = (match.players ?? []).filter((id) => id !== actorUserId);
+  if (!targets.length) {
+    return;
+  }
+
+  const status = accepted ? 'validated' : 'rejected';
+  await sendPushToUsers(targets, {
+    title: accepted ? 'Match valide' : 'Match refuse',
+    body: accepted
+      ? 'Le score du match a ete valide par les joueurs.'
+      : 'Le score du match a ete rejete et doit etre corrige.',
+    data: {
+      type: accepted ? 'match_validated' : 'match_rejected',
+      matchId: match.id,
+      status,
+    },
+  });
+}
+
+async function notifyInviteCreated(match, actorUserId) {
+  const targets = (match.players ?? []).filter((id) => id !== actorUserId);
+  if (!targets.length) {
+    return;
+  }
+  await sendPushToUsers(targets, {
+    title: 'Invitation Padely',
+    body: 'Un joueur t a envoye une invitation de match.',
+    data: {
+      type: 'player_invited',
+      matchId: match.id,
+      fromUserId: actorUserId,
+    },
+  });
+}
+
+async function notifyLeaderboardMovement(cities, matchId) {
+  const users = await store.listUsers();
+  for (const rawCity of cities) {
+    const city = String(rawCity ?? '').trim();
+    if (!city) {
+      continue;
+    }
+
+    const previous = await store.getLeaderboard(city);
+    const next = await refreshCityLeaderboard(city);
+    if (!leaderboardMoved(previous, next)) {
+      continue;
+    }
+
+    const targets = users
+      .filter((user) => String(user.city ?? '').toLowerCase() === city.toLowerCase())
+      .map((user) => user.id);
+
+    if (!targets.length) {
+      continue;
+    }
+
+    await sendPushToUsers(targets, {
+      title: `Classement ${city}`,
+      body: 'Le classement de ta ville vient de bouger.',
+      data: {
+        type: 'leaderboard_moved',
+        city,
+        matchId,
+      },
+    });
+  }
 }
 
 function createEnginePlayer(slot, watch, usersById, partnerSlot, pairRating) {
@@ -468,7 +576,7 @@ export async function createMatch(payload, createdBy) {
   });
 
   if (mode === 'friendly') {
-    return store.updateMatch(created.id, {
+    const friendlyMatch = await store.updateMatch(created.id, {
       status: 'validated',
       rated: false,
       validation: {
@@ -477,12 +585,17 @@ export async function createMatch(payload, createdBy) {
       },
       validatedAt: new Date().toISOString(),
     });
+    await notifyMatchCreated(friendlyMatch);
+    return friendlyMatch;
   }
 
   if (requiredValidations === 0) {
-    return rateValidatedMatch(created.id);
+    const rated = await rateValidatedMatch(created.id);
+    await notifyMatchCreated(rated);
+    return rated;
   }
 
+  await notifyMatchCreated(created);
   return created;
 }
 
@@ -529,13 +642,17 @@ export async function validateMatch({ matchId, userId, accepted }) {
   });
 
   if (rejectedCount >= 1) {
-    return store.updateMatch(matchId, {
+    const rejectedMatch = await store.updateMatch(matchId, {
       status: 'rejected',
     });
+    await notifyMatchStatus(rejectedMatch, { accepted: false, actorUserId: userId });
+    return rejectedMatch;
   }
 
   if (acceptedCount >= updated.validation.required && !updated.rated) {
-    return rateValidatedMatch(matchId);
+    const validatedMatch = await rateValidatedMatch(matchId);
+    await notifyMatchStatus(validatedMatch, { accepted: true, actorUserId: userId });
+    return validatedMatch;
   }
 
   return updated;
@@ -635,12 +752,19 @@ export async function rateValidatedMatch(matchId) {
     await store.upsertPairRating(pairBKey, result.teamB.reduce((s, p) => s + p.pairRatingAfter, 0) / 2);
   }
 
-  return store.updateMatch(matchId, {
+  const validatedMatch = await store.updateMatch(matchId, {
     status: 'validated',
     rated: true,
     ratingResult: result,
     validatedAt: new Date().toISOString(),
   });
+
+  const affectedCities = [...new Set(userIds
+    .map((id) => usersById.get(id)?.city)
+    .filter((city) => String(city ?? '').trim().length > 0))];
+  await notifyLeaderboardMovement(affectedCities, matchId);
+
+  return validatedMatch;
 }
 
 export async function createPostMatchInvite(matchId, userId) {
@@ -665,6 +789,8 @@ export async function createPostMatchInvite(matchId, userId) {
   await store.updateMatch(matchId, {
     invites: [invite, ...previous].slice(0, 20),
   });
+
+  await notifyInviteCreated(match, userId);
 
   return invite;
 }

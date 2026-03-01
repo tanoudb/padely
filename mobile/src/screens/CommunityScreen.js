@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useRoute } from '@react-navigation/native';
 import * as Location from 'expo-location';
 import { LinearGradient } from 'expo-linear-gradient';
 import { api } from '../api/client';
@@ -119,6 +120,7 @@ function clubCodeFromQrValue(raw) {
 }
 
 export function CommunityScreen() {
+  const route = useRoute();
   const { token, user } = useSession();
   const { t } = useI18n();
 
@@ -150,6 +152,8 @@ export function CommunityScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
   const greeting = useMemo(() => greetingLine(user.displayName, t), [user.displayName, t]);
+  const routeFriendId = route.params?.friendId ? String(route.params.friendId) : '';
+  const routeCity = route.params?.city ? String(route.params.city) : '';
 
   async function detectCityFromLocation() {
     setIsLocating(true);
@@ -221,6 +225,12 @@ export function CommunityScreen() {
   }, []);
 
   useEffect(() => {
+    if (routeCity) {
+      setCity(routeCity);
+    }
+  }, [routeCity]);
+
+  useEffect(() => {
     refreshCrew().catch(() => {});
   }, [token, city]);
 
@@ -245,6 +255,14 @@ export function CommunityScreen() {
   useEffect(() => {
     refreshChannelMessages(selectedClubChannel).catch(() => {});
   }, [selectedClubChannel]);
+
+  useEffect(() => {
+    if (!routeFriendId) {
+      return;
+    }
+    setSelectedFriend(routeFriendId);
+    setActiveTab('home');
+  }, [routeFriendId]);
 
   const friends = crew?.friends ?? [];
   const publicChannels = crew?.publicChannels ?? [];

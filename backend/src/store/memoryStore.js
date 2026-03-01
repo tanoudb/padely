@@ -82,6 +82,7 @@ export class MemoryStore {
       watch: {
         enabled: false,
       },
+      pushTokens: [],
     };
 
     this.users.set(id, user);

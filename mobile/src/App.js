@@ -1,9 +1,12 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Platform, StyleSheet, Text, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { useFonts } from 'expo-font';
 import { NavigationContainer, DefaultTheme, getFocusedRouteNameFromRoute } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
 import { Icon } from './components/Icon';
 import { AuthScreen } from './screens/AuthScreen';
 import { OnboardingScreen } from './screens/OnboardingScreen';
@@ -16,7 +19,9 @@ import { PlayResultScreen } from './screens/play/PlayResultScreen';
 import { SessionProvider, useSession } from './state/session';
 import { I18nProvider, useI18n } from './state/i18n';
 import { UiProvider, useUi } from './state/ui';
+import { api } from './api/client';
 import { theme } from './theme';
+import { getPushDataFromNotification, registerForRealtimePush, resolvePushRoute } from './utils/pushRealtime';
 
 const AuthStack = createNativeStackNavigator();
 const HomeStack = createNativeStackNavigator();
@@ -95,9 +100,10 @@ function isPlayImmersive(route) {
   return nested === 'PlayScoring' || nested === 'PlayResult';
 }
 
-function MainTabsNavigator() {
+function MainTabsNavigator({ communityBadgeCount, onCommunityFocus }) {
   const { palette } = useUi();
   const { t } = useI18n();
+  const badgeLabel = communityBadgeCount > 99 ? '99+' : String(communityBadgeCount);
 
   return (
     <Tab.Navigator
@@ -139,7 +145,21 @@ function MainTabsNavigator() {
     >
       <Tab.Screen name="HomeTab" component={HomeStackNavigator} options={{ tabBarLabel: t('tabs.home') }} />
       <Tab.Screen name="PlayTab" component={PlayStackNavigator} options={{ tabBarLabel: t('tabs.play') }} />
-      <Tab.Screen name="CommunityTab" component={CommunityStackNavigator} options={{ tabBarLabel: t('tabs.social') }} />
+      <Tab.Screen
+        name="CommunityTab"
+        component={CommunityStackNavigator}
+        listeners={{ focus: onCommunityFocus }}
+        options={{
+          tabBarLabel: t('tabs.social'),
+          tabBarBadge: communityBadgeCount > 0 ? badgeLabel : undefined,
+          tabBarBadgeStyle: {
+            backgroundColor: palette.accent,
+            color: palette.accentText,
+            fontFamily: theme.fonts.title,
+            fontSize: 10,
+          },
+        }}
+      />
       <Tab.Screen name="ProfileTab" component={ProfileStackNavigator} options={{ tabBarLabel: t('tabs.profile') }} />
     </Tab.Navigator>
   );
@@ -160,6 +180,9 @@ function MainRouter() {
   const { palette, setMode } = useUi();
   const { setLanguage } = useI18n();
   const [booting, setBooting] = useState(true);
+  const [communityBadgeCount, setCommunityBadgeCount] = useState(0);
+  const lastPushTokenRef = useRef('');
+  const navRef = useRef(null);
 
   useEffect(() => {
     const timer = setTimeout(() => setBooting(false), 900);
@@ -185,6 +208,47 @@ function MainRouter() {
     refreshProfile().catch(() => {});
   }, [hydrated, refreshProfile, token]);
 
+  useEffect(() => {
+    if (!token || !user?.id) {
+      lastPushTokenRef.current = '';
+      return;
+    }
+
+    async function syncPushToken() {
+      const out = await registerForRealtimePush();
+      if (!out.granted || !out.token || out.token === lastPushTokenRef.current) {
+        return;
+      }
+      await api.updatePushToken(token, {
+        token: out.token,
+        platform: Platform.OS,
+        appVersion: Constants?.expoConfig?.version ?? null,
+      });
+      lastPushTokenRef.current = out.token;
+    }
+
+    syncPushToken().catch(() => {});
+  }, [token, user?.id]);
+
+  useEffect(() => {
+    const receivedSub = Notifications.addNotificationReceivedListener(() => {
+      setCommunityBadgeCount((prev) => Math.min(prev + 1, 99));
+    });
+
+    const responseSub = Notifications.addNotificationResponseReceivedListener((response) => {
+      const data = getPushDataFromNotification(response?.notification);
+      const route = resolvePushRoute(data);
+      if (route?.tab && navRef.current) {
+        navRef.current.navigate(route.tab, route.params);
+      }
+    });
+
+    return () => {
+      receivedSub.remove();
+      responseSub.remove();
+    };
+  }, []);
+
   const navTheme = useMemo(() => ({
     ...DefaultTheme,
     colors: {
@@ -203,18 +267,38 @@ function MainRouter() {
   }
 
   return (
-    <NavigationContainer theme={navTheme}>
-      {!token || !user ? <AuthNavigator /> : <MainTabsNavigator />}
+    <NavigationContainer
+      ref={navRef}
+      theme={navTheme}
+    >
+      {!token || !user ? (
+        <AuthNavigator />
+      ) : (
+        <MainTabsNavigator
+          communityBadgeCount={communityBadgeCount}
+          onCommunityFocus={() => setCommunityBadgeCount(0)}
+        />
+      )}
     </NavigationContainer>
   );
 }
 
 export default function App() {
+  const [fontsLoaded] = useFonts({
+    'DMSans-Regular': require('../assets/fonts/DMSans-Regular.ttf'),
+    'DMSans-Medium': require('../assets/fonts/DMSans-Medium.ttf'),
+    'DMSans-Bold': require('../assets/fonts/DMSans-Bold.ttf'),
+  });
+
+  if (!fontsLoaded) {
+    return <View style={styles.fontFallback} />;
+  }
+
   return (
     <UiProvider>
       <I18nProvider>
         <SessionProvider>
-          <StatusBar style="light" />
+          <StatusBar style="auto" />
           <MainRouter />
         </SessionProvider>
       </I18nProvider>
@@ -223,6 +307,10 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
+  fontFallback: {
+    flex: 1,
+    backgroundColor: theme.colors.bg,
+  },
   splash: {
     flex: 1,
     justifyContent: 'center',
