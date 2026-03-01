@@ -43,6 +43,13 @@ import {
   validateMatch,
 } from './services/matchService.js';
 import {
+  closeLiveMatchSession,
+  getLiveMatchState,
+  pushLiveScoreUpdate,
+  startLiveMatchSession,
+  subscribeLiveMatch,
+} from './services/liveMatchService.js';
+import {
   completeOnboarding,
   getProfile,
   updatePushToken,
@@ -117,6 +124,11 @@ function inferStatusCode(error) {
     return 400;
   }
   return 500;
+}
+
+function writeSseEvent(res, event, data) {
+  res.write(`event: ${event}\n`);
+  res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
 const server = http.createServer(async (req, res) => {
@@ -214,6 +226,85 @@ const server = http.createServer(async (req, res) => {
       const me = await requireAuth(req);
       const payload = await readJson(req);
       return json(res, 201, await createMatch(payload, me.id));
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/v1/matches/live') {
+      const me = await requireAuth(req);
+      const payload = await readJson(req);
+      return json(res, 201, startLiveMatchSession({
+        createdBy: me.id,
+        participants: payload.participants ?? [],
+        initialScoreState: payload.scoreState ?? {},
+        metadata: payload.metadata ?? {},
+      }));
+    }
+
+    {
+      const params = pathMatch(url.pathname, '/api/v1/matches/:matchId/live/state');
+      if (req.method === 'GET' && params) {
+        const me = await requireAuth(req);
+        return json(res, 200, getLiveMatchState({
+          matchId: params.matchId,
+          userId: me.id,
+        }));
+      }
+    }
+
+    {
+      const params = pathMatch(url.pathname, '/api/v1/matches/:matchId/live');
+      if (req.method === 'GET' && params) {
+        const me = await requireAuth(req);
+        getLiveMatchState({
+          matchId: params.matchId,
+          userId: me.id,
+        });
+
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache, no-transform',
+          Connection: 'keep-alive',
+          'X-Accel-Buffering': 'no',
+        });
+
+        const unsubscribe = subscribeLiveMatch({
+          matchId: params.matchId,
+          userId: me.id,
+          onEvent: ({ event, data }) => writeSseEvent(res, event, data),
+        });
+
+        const heartbeat = setInterval(() => {
+          res.write(': heartbeat\n\n');
+        }, 20_000);
+
+        req.on('close', () => {
+          clearInterval(heartbeat);
+          unsubscribe();
+          res.end();
+        });
+        return undefined;
+      }
+
+      if (req.method === 'PUT' && params) {
+        const me = await requireAuth(req);
+        const payload = await readJson(req);
+        return json(res, 200, pushLiveScoreUpdate({
+          matchId: params.matchId,
+          userId: me.id,
+          scoreState: payload.scoreState ?? {},
+          actorDeviceId: payload.actorDeviceId,
+        }));
+      }
+
+      if (req.method === 'DELETE' && params) {
+        const me = await requireAuth(req);
+        const payload = await readJson(req);
+        return json(res, 200, closeLiveMatchSession({
+          matchId: params.matchId,
+          userId: me.id,
+          reason: payload.reason ?? 'manual_close',
+          linkedMatchId: payload.linkedMatchId ?? null,
+        }));
+      }
     }
 
     if (req.method === 'GET' && url.pathname === '/api/v1/matches') {

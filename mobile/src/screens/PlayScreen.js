@@ -16,13 +16,14 @@ import {
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
-import { api } from '../api/client';
+import { API_URL, api } from '../api/client';
 import { Card } from '../components/Card';
 import { QrScannerModal } from '../components/QrScannerModal';
 import { VictoryOverlay } from '../components/VictoryOverlay';
 import { useI18n } from '../state/i18n';
 import { useSession } from '../state/session';
 import { theme } from '../theme';
+import { createLiveScoreSubscription } from '../utils/liveScoreStream';
 import {
   addPoint,
   createScoreState,
@@ -233,6 +234,13 @@ function victoryTone(sets, winner) {
   };
 }
 
+function scoreStateForLive(state) {
+  return {
+    ...state,
+    history: [],
+  };
+}
+
 export function PlayScreen() {
   const { token, user } = useSession();
   const { t } = useI18n();
@@ -260,6 +268,9 @@ export function PlayScreen() {
   const [savedInviteUrl, setSavedInviteUrl] = useState('');
   const [pirDetail, setPirDetail] = useState(null);
   const [victoryPirDelta, setVictoryPirDelta] = useState(0);
+  const [liveMatchId, setLiveMatchId] = useState('');
+  const [joinLiveInput, setJoinLiveInput] = useState('');
+  const [liveStatus, setLiveStatus] = useState('offline');
 
   const { width, height } = useWindowDimensions();
   const landscape = width > height;
@@ -268,6 +279,11 @@ export function PlayScreen() {
   const flashA = useRef(new Animated.Value(0)).current;
   const flashB = useRef(new Animated.Value(0)).current;
   const prevSetGamesRef = useRef({ a: 0, b: 0, sets: 0 });
+  const liveSubscriptionRef = useRef(null);
+  const liveDeviceIdRef = useRef(`device_${user.id}_${Date.now()}`);
+  const ignoreNextLivePublishRef = useRef(false);
+  const latestLiveSequenceRef = useRef(0);
+  const lastPublishedPayloadRef = useRef('');
 
   const selectablePlayers = useMemo(
     () => players.filter((p) => p.id !== user.id),
@@ -283,6 +299,10 @@ export function PlayScreen() {
       guestLevel: g.level,
     })),
   ]), [selectedUsers, guests]);
+  const liveParticipants = useMemo(
+    () => [user.id, ...selectedUsers],
+    [user.id, selectedUsers],
+  );
 
   const displayPoints = getDisplayPoints(score);
   const currentServer = getCurrentServer(score);
@@ -348,6 +368,112 @@ export function PlayScreen() {
     setAutoSideSwitch(Boolean(user.settings?.autoSideSwitch ?? true));
   }, [user.settings, defaultMatchMode]);
 
+  useEffect(() => () => {
+    if (liveSubscriptionRef.current) {
+      liveSubscriptionRef.current();
+      liveSubscriptionRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!liveMatchId || !token) {
+      if (liveSubscriptionRef.current) {
+        liveSubscriptionRef.current();
+        liveSubscriptionRef.current = null;
+      }
+      setLiveStatus('offline');
+      return;
+    }
+
+    if (liveSubscriptionRef.current) {
+      liveSubscriptionRef.current();
+      liveSubscriptionRef.current = null;
+    }
+
+    setLiveStatus('connecting');
+    const unsubscribe = createLiveScoreSubscription({
+      apiUrl: API_URL,
+      matchId: liveMatchId,
+      token,
+      onEvent: ({ event, data }) => {
+        if (!data) {
+          return;
+        }
+
+        if (event === 'snapshot' || event === 'score_update') {
+          const sequence = Number(data.sequence ?? 0);
+          if (sequence <= latestLiveSequenceRef.current && event !== 'snapshot') {
+            return;
+          }
+          latestLiveSequenceRef.current = Math.max(latestLiveSequenceRef.current, sequence);
+          if (data.scoreState) {
+            ignoreNextLivePublishRef.current = true;
+            setScore((prev) => ({
+              ...prev,
+              ...data.scoreState,
+              history: prev.history ?? [],
+            }));
+          }
+          setLiveStatus(data.status === 'closed' ? 'closed' : 'connected');
+          return;
+        }
+
+        if (event === 'session_closed') {
+          setLiveStatus('closed');
+          if (data.scoreState) {
+            ignoreNextLivePublishRef.current = true;
+            setScore((prev) => ({
+              ...prev,
+              ...data.scoreState,
+              history: prev.history ?? [],
+            }));
+          }
+          if (data.linkedMatchId) {
+            setSavedMatchId(data.linkedMatchId);
+          }
+        }
+      },
+      onError: () => {
+        setLiveStatus('fallback');
+      },
+    });
+
+    liveSubscriptionRef.current = unsubscribe;
+    return () => {
+      if (liveSubscriptionRef.current) {
+        liveSubscriptionRef.current();
+        liveSubscriptionRef.current = null;
+      }
+    };
+  }, [liveMatchId, token]);
+
+  useEffect(() => {
+    if (!liveMatchId || liveStatus === 'offline' || liveStatus === 'closed') {
+      return;
+    }
+
+    if (ignoreNextLivePublishRef.current) {
+      ignoreNextLivePublishRef.current = false;
+      return;
+    }
+
+    const payload = scoreStateForLive(score);
+    const digest = JSON.stringify(payload);
+    if (digest === lastPublishedPayloadRef.current) {
+      return;
+    }
+    lastPublishedPayloadRef.current = digest;
+
+    const timer = setTimeout(() => {
+      api.updateLiveScore(token, liveMatchId, {
+        actorDeviceId: liveDeviceIdRef.current,
+        scoreState: payload,
+      }).catch(() => {});
+    }, 120);
+
+    return () => clearTimeout(timer);
+  }, [score, liveMatchId, liveStatus, token]);
+
   useEffect(() => {
     const prev = prevSetGamesRef.current;
     if (score.currentSet.a > prev.a) {
@@ -399,6 +525,7 @@ export function PlayScreen() {
           totalCostEur: Number(totalCost),
           clubName: 'Club local',
           watchByPlayer: estimatedWatchByPlayer,
+          liveMatchId: liveMatchId || undefined,
         });
         setVictoryPirDelta(Number(out?.pirImpact?.delta ?? 0));
 
@@ -413,6 +540,9 @@ export function PlayScreen() {
           inviteSuffix = '';
         }
         setSavedMatchId(out.id);
+        if (liveMatchId) {
+          setLiveStatus('closed');
+        }
         if (matchMode === 'ranked') {
           setFeedback(t('play.msgAutoSavedRanked', { id: out.id.slice(-6), suffix: inviteSuffix }));
         } else {
@@ -519,6 +649,77 @@ export function PlayScreen() {
     }
   }
 
+  async function startLiveSession() {
+    if (liveMatchId) {
+      setLiveStatus('connected');
+      return;
+    }
+    if (selectedSlots.length !== 3) {
+      setFeedback(t('play.msgNeedPlayers'));
+      return;
+    }
+
+    try {
+      const out = await api.startLiveMatch(token, {
+        participants: liveParticipants,
+        scoreState: scoreStateForLive(score),
+        metadata: {
+          mode: matchMode,
+          format: matchFormat,
+        },
+      });
+      setLiveMatchId(out.matchId);
+      setJoinLiveInput(out.matchId);
+      latestLiveSequenceRef.current = Number(out.sequence ?? 0);
+      setLiveStatus('connected');
+      setFeedback(`Live actif: ${out.matchId.slice(-6)}.`);
+    } catch (error) {
+      setFeedback(`Live impossible: ${error.message}`);
+      setLiveStatus('offline');
+    }
+  }
+
+  async function joinLiveSession() {
+    const wanted = joinLiveInput.trim();
+    if (!wanted) {
+      setFeedback('Entre un code de match live.');
+      return;
+    }
+    try {
+      const state = await api.liveMatchState(token, wanted);
+      setLiveMatchId(state.matchId);
+      latestLiveSequenceRef.current = Number(state.sequence ?? 0);
+      ignoreNextLivePublishRef.current = true;
+      setScore((prev) => ({
+        ...prev,
+        ...(state.scoreState ?? {}),
+        history: prev.history ?? [],
+      }));
+      setLiveStatus(state.status === 'closed' ? 'closed' : 'connected');
+      setFullScreenMode(true);
+      setFeedback(`Connecte au live ${wanted.slice(-6)}.`);
+    } catch (error) {
+      setFeedback(`Impossible de rejoindre ce live: ${error.message}`);
+      setLiveStatus('offline');
+    }
+  }
+
+  async function leaveLiveSession() {
+    if (!liveMatchId) {
+      return;
+    }
+    const current = liveMatchId;
+    setLiveMatchId('');
+    setLiveStatus('offline');
+    lastPublishedPayloadRef.current = '';
+    latestLiveSequenceRef.current = 0;
+    try {
+      await api.closeLiveMatch(token, current, { reason: 'manual_close' });
+    } catch {
+      // Session may already be closed by another participant.
+    }
+  }
+
   async function shareInvite() {
     if (!savedInviteUrl || !savedMatchId) {
       setFeedback(t('play.msgNoShareLink'));
@@ -557,6 +758,7 @@ export function PlayScreen() {
         totalCostEur: Number(totalCost),
         clubName: 'Club local',
         watchByPlayer: estimatedWatchByPlayer,
+        liveMatchId: liveMatchId || undefined,
       });
       setVictoryPirDelta(Number(out?.pirImpact?.delta ?? 0));
 
@@ -576,6 +778,9 @@ export function PlayScreen() {
         setFeedback(t('play.msgCreated', { id: out.id.slice(-6), suffix: inviteSuffix }));
       }
       setSavedMatchId(out.id);
+      if (liveMatchId) {
+        setLiveStatus('closed');
+      }
       await refresh();
     } catch (e) {
       setFeedback(e.message);
@@ -598,6 +803,11 @@ export function PlayScreen() {
     setSavedMatchId(null);
     setSavedInviteUrl('');
     setVictoryPirDelta(0);
+    setLiveMatchId('');
+    setLiveStatus('offline');
+    setJoinLiveInput('');
+    lastPublishedPayloadRef.current = '';
+    latestLiveSequenceRef.current = 0;
     setFullScreenMode(false);
     setFeedback(t('play.msgNewMatchReady'));
   }
@@ -792,9 +1002,45 @@ export function PlayScreen() {
             </View>
           </View>
 
-          <Pressable style={styles.fullBtn} onPress={() => setFullScreenMode(true)}>
+          <Pressable
+            style={styles.fullBtn}
+            onPress={() => {
+              setFullScreenMode(true);
+              startLiveSession().catch(() => {});
+            }}
+          >
             <Text style={styles.fullBtnText}>{t('play.fullscreen')}</Text>
           </Pressable>
+        </Card>
+
+        <Card>
+          <Text style={styles.sectionTitle}>Score live multi-device</Text>
+          <Text style={styles.meta}>
+            {liveMatchId
+              ? `Session ${liveMatchId.slice(-6)} · ${liveStatus}`
+              : 'Demarre ou rejoins un canal live pour synchroniser le score en temps reel.'}
+          </Text>
+          <View style={styles.row}>
+            <Pressable style={[styles.actionBtn, styles.accept]} onPress={startLiveSession}>
+              <Text style={styles.actionText}>{liveMatchId ? 'Reprendre live' : 'Demarrer live'}</Text>
+            </Pressable>
+            <Pressable style={[styles.actionBtn, styles.resetBtn]} onPress={leaveLiveSession}>
+              <Text style={styles.actionText}>Quitter live</Text>
+            </Pressable>
+          </View>
+          <View style={styles.row}>
+            <TextInput
+              style={[styles.input, styles.rowTagInput]}
+              placeholder="Code live (ex: live_ABC123)"
+              placeholderTextColor={theme.colors.muted}
+              autoCapitalize="none"
+              value={joinLiveInput}
+              onChangeText={setJoinLiveInput}
+            />
+            <Pressable style={styles.tagBtn} onPress={joinLiveSession}>
+              <Text style={styles.tagBtnText}>Rejoindre</Text>
+            </Pressable>
+          </View>
         </Card>
 
         <Card>

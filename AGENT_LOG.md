@@ -69,3 +69,18 @@ Sur mobile, le token Expo est enregistré automatiquement après login, les noti
 ✅
 ### Prochaine mission recommandée
 WEBSOCKET / SSE LIVE SCORING
+
+## [2026-03-02] — Run #03
+### Mission
+WEBSOCKET / SSE LIVE SCORING
+### Résultat
+Le scoring est maintenant réellement multi-device: un joueur démarre un canal live, les autres participants rejoignent avec le code live, et le score se synchronise en temps réel sans refresh.
+Quand le match est sauvegardé, la session live se ferme automatiquement et se lie au match final; les participants reçoivent l’état final instantanément.
+### Technique
+Backend: nouveau service `backend/src/services/liveMatchService.js` (sessions live, séquences, subscribe/broadcast, clôture), nouveaux endpoints `POST /api/v1/matches/live`, `GET /api/v1/matches/:matchId/live` (SSE), `PUT /api/v1/matches/:matchId/live`, `GET /api/v1/matches/:matchId/live/state`, `DELETE /api/v1/matches/:matchId/live` dans `backend/src/server.js`, et rattachement `liveMatchId` dans `backend/src/services/matchService.js` lors de la création de match.
+Mobile: extension API dans `mobile/src/api/client.js`, nouveau client stream `mobile/src/utils/liveScoreStream.js` (SSE + fallback polling), intégration complète dans `mobile/src/screens/PlayScreen.js` (démarrer/rejoindre/quitter live, sync score bidirectionnelle, liaison auto à la sauvegarde match).
+Tests: `backend/test/liveScoring.test.js` ajouté; suite backend complète passe en `19/19`.
+### Statut
+✅
+### Prochaine mission recommandée
+PERSISTANCE DATABASE

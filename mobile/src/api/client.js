@@ -1,4 +1,4 @@
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://127.0.0.1:8787';
+export const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://127.0.0.1:8787';
 
 async function request(path, { method = 'GET', body, token } = {}) {
   let response;
@@ -47,6 +47,18 @@ export const api = {
   updateSettings: (token, body) => request('/api/v1/profile/settings', { method: 'PUT', token, body }),
   updatePushToken: (token, body) => request('/api/v1/profile/push-token', { method: 'PUT', token, body }),
   createMatch: (token, body) => request('/api/v1/matches', { method: 'POST', token, body }),
+  startLiveMatch: (token, body) => request('/api/v1/matches/live', { method: 'POST', token, body }),
+  updateLiveScore: (token, matchId, body) => request(`/api/v1/matches/${encodeURIComponent(matchId)}/live`, {
+    method: 'PUT',
+    token,
+    body,
+  }),
+  closeLiveMatch: (token, matchId, body = {}) => request(`/api/v1/matches/${encodeURIComponent(matchId)}/live`, {
+    method: 'DELETE',
+    token,
+    body,
+  }),
+  liveMatchState: (token, matchId) => request(`/api/v1/matches/${encodeURIComponent(matchId)}/live/state`, { token }),
   listMyMatches: (token, status) => request(`/api/v1/matches${status ? `?status=${encodeURIComponent(status)}` : ''}`, { token }),
   validateMatch: (token, matchId, accepted) => request(`/api/v1/matches/${matchId}/validate`, { method: 'POST', token, body: { accepted } }),
   createMatchInvite: (token, matchId) => request(`/api/v1/matches/${matchId}/invite`, { method: 'POST', token }),

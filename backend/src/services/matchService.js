@@ -4,6 +4,7 @@ import { store } from '../store/index.js';
 import { newToken } from '../utils/security.js';
 import { newId } from '../utils/id.js';
 import { refreshCityLeaderboard } from './communityService.js';
+import { closeLiveMatchSession } from './liveMatchService.js';
 import { sendPushToUsers } from './pushService.js';
 
 function pairKey(team) {
@@ -569,11 +570,25 @@ export async function createMatch(payload, createdBy) {
     },
     validationMode,
     rated: false,
+    liveSessionId: payload.liveMatchId ? String(payload.liveMatchId) : null,
     usersSnapshot: {
       teamA: teamA.map((slot) => slotSnapshot(slot, usersById)),
       teamB: teamB.map((slot) => slotSnapshot(slot, usersById)),
     },
   });
+
+  if (payload.liveMatchId) {
+    try {
+      closeLiveMatchSession({
+        matchId: payload.liveMatchId,
+        userId: createdBy,
+        reason: 'match_saved',
+        linkedMatchId: created.id,
+      });
+    } catch {
+      // Live session might already be closed or absent; do not block match persistence.
+    }
+  }
 
   if (mode === 'friendly') {
     const friendlyMatch = await store.updateMatch(created.id, {
