@@ -6,7 +6,8 @@
   "private": true,
   "scripts": {
     "start": "node src/server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "seed": "node src/store/seedCli.js"
   },
   "dependencies": {
     "apple-signin-auth": "^2.0.0",

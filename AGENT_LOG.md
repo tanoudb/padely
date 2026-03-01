@@ -84,3 +84,16 @@ Tests: `backend/test/liveScoring.test.js` ajouté; suite backend complète passe
 ✅
 ### Prochaine mission recommandée
 PERSISTANCE DATABASE
+
+## [2026-03-02] — Run #04
+### Mission
+PERSISTANCE DATABASE (SQLite)
+### Résultat
+Les données backend survivent désormais aux redémarrages serveur: utilisateurs, matchs, validations, paires, leaderboards, messages de communauté/DM, clubs et badges sont persistés en SQLite.
+Les canaux communauté ne perdent plus leur historique après restart et les badges débloqués restent stockés durablement.
+### Technique
+Nouveau store `backend/src/store/sqliteStore.js` avec migrations automatiques (tables `users`, `matches`, `validations`, `pairs`, `leaderboard_cache`, `badges`, `clubs`, `messages`, `sessions`, `email_verifications`, `bag_items`, `marketplace`) et seed catalogue clubs. Provider backend basculé par défaut sur SQLite dans `backend/src/store/index.js` (fallback test isolé `:memory:` par worker). `communityService` migré vers le store pour persister messages et clubs. `gamificationService` persist désormais les badges débloqués. Script de seed ajouté (`npm run seed`) via `backend/src/store/seedCli.js`. Test de persistance ajouté: `backend/test/sqlitePersistence.test.js`.
+### Statut
+✅
+### Prochaine mission recommandée
+VALIDATION INPUT + ERROR HANDLING

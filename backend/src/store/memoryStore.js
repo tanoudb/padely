@@ -31,6 +31,28 @@ export class MemoryStore {
     this.marketplace = new Map();
     this.cityLeaderboard = new Map();
     this.pairRatings = new Map();
+    this.messages = new Map();
+    this.badges = new Map();
+    this.clubs = [
+      {
+        key: 'club:urban-padel-lyon',
+        title: 'Urban Padel Lyon',
+        city: 'Lyon',
+        joinCode: 'UP-LYON-01',
+      },
+      {
+        key: 'club:esprit-padel-villeurbanne',
+        title: 'Esprit Padel Villeurbanne',
+        city: 'Lyon',
+        joinCode: 'EP-VILLEUR-02',
+      },
+      {
+        key: 'club:casa-padel-paris',
+        title: 'Casa Padel Paris',
+        city: 'Paris',
+        joinCode: 'CP-PARIS-01',
+      },
+    ];
   }
 
   createUser({ email, passwordHash, provider, displayName, isVerified }) {
@@ -296,5 +318,71 @@ export class MemoryStore {
 
   getLeaderboard(city) {
     return this.cityLeaderboard.get(city.toLowerCase()) ?? [];
+  }
+
+  listChannelMessages(channel, limit = 40) {
+    const key = `channel:${channel}`;
+    const items = this.messages.get(key) ?? [];
+    return items.slice(-Math.max(1, Math.min(100, limit)));
+  }
+
+  addChannelMessage(message) {
+    const key = `channel:${message.channel}`;
+    if (!this.messages.has(key)) {
+      this.messages.set(key, []);
+    }
+    this.messages.get(key).push(message);
+    return message;
+  }
+
+  listPrivateMessages(userId, friendId, limit = 60) {
+    const key = `dm:${[userId, friendId].sort().join(':')}`;
+    const items = this.messages.get(key) ?? [];
+    return items.slice(-Math.max(1, Math.min(150, limit)));
+  }
+
+  addPrivateMessage(message) {
+    const key = `dm:${[message.fromUserId, message.toUserId].sort().join(':')}`;
+    if (!this.messages.has(key)) {
+      this.messages.set(key, []);
+    }
+    this.messages.get(key).push(message);
+    return message;
+  }
+
+  listClubs({ city } = {}) {
+    if (!city) {
+      return [...this.clubs];
+    }
+    return this.clubs.filter((club) => club.city.toLowerCase() === city.toLowerCase());
+  }
+
+  getClubByJoinCode(code) {
+    return this.clubs.find((club) => club.joinCode.toLowerCase() === String(code ?? '').toLowerCase()) ?? null;
+  }
+
+  getClubByKey(key) {
+    return this.clubs.find((club) => club.key === key) ?? null;
+  }
+
+  unlockBadge(userId, badgeKey, meta = {}) {
+    const current = this.badges.get(userId) ?? [];
+    const existing = current.find((item) => item.badgeKey === badgeKey);
+    if (existing) {
+      return { ...existing, created: false };
+    }
+    const next = {
+      id: newId('bdg'),
+      userId,
+      badgeKey,
+      unlockedAt: nowIso(),
+      meta,
+    };
+    this.badges.set(userId, [next, ...current]);
+    return { ...next, created: true };
+  }
+
+  listBadgesForUser(userId) {
+    return this.badges.get(userId) ?? [];
   }
 }

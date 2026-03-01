@@ -1,10 +1,7 @@
 import { store } from '../store/index.js';
 import { findBalancedMatches } from '../engine/matchmaking.js';
 
-const channelMessages = new Map();
-const privateMessages = new Map();
-
-const CLUB_CHANNELS = [
+const FALLBACK_CLUB_CHANNELS = [
   {
     key: 'club:urban-padel-lyon',
     title: 'Urban Padel Lyon',
@@ -62,10 +59,6 @@ function cityChannelKey(city) {
   return `city:${normalizedLower(city)}`;
 }
 
-function pairMessageKey(userA, userB) {
-  return [userA, userB].sort().join(':');
-}
-
 function safeProfile(user) {
   return {
     id: user.id,
@@ -91,29 +84,45 @@ function normalizeArcadeTag(tag) {
   return normalizedLower(tag).replace(/\s+/g, '').replace('-', '');
 }
 
-function ensureChannelSeed(channel, label) {
-  if (!channelMessages.has(channel)) {
-    channelMessages.set(channel, [
-      {
-        id: `msg_${Date.now()}`,
-        channel,
-        text: `Bienvenue dans le canal ${label}.`,
-        senderName: 'Padely Bot',
-        senderId: 'system',
-        createdAt: new Date().toISOString(),
-      },
-    ]);
+async function getClubs() {
+  if (typeof store.listClubs === 'function') {
+    const clubs = await store.listClubs();
+    if (clubs.length > 0) {
+      return clubs;
+    }
   }
+  return FALLBACK_CLUB_CHANNELS;
 }
 
-function channelTitleFromKey(channel) {
+async function ensureChannelSeed(channel, label) {
+  if (typeof store.listChannelMessages !== 'function' || typeof store.addChannelMessage !== 'function') {
+    return;
+  }
+
+  const current = await store.listChannelMessages(channel, 1);
+  if (current.length > 0) {
+    return;
+  }
+
+  await store.addChannelMessage({
+    id: `msg_${Date.now()}`,
+    channel,
+    text: `Bienvenue dans le canal ${label}.`,
+    senderName: 'Padely Bot',
+    senderId: 'system',
+    createdAt: new Date().toISOString(),
+  });
+}
+
+async function channelTitleFromKey(channel) {
   if (channel === 'france') return 'Canal France';
   if (isRegionalChannel(channel)) {
     const city = channel.split(':')[1] ?? 'region';
     return `Canal ${city.charAt(0).toUpperCase()}${city.slice(1)}`;
   }
   if (isClubChannel(channel)) {
-    const club = CLUB_CHANNELS.find((c) => c.key === channel);
+    const clubs = await getClubs();
+    const club = clubs.find((c) => c.key === channel);
     return club?.title ?? 'Canal club';
   }
   if (isCustomChannel(channel)) {
@@ -155,9 +164,16 @@ async function isAllowedChannelForUser(user, channel) {
   return false;
 }
 
-function getClubByCode(code) {
+async function getClubByCode(code) {
   const safe = normalizedLower(code);
-  return CLUB_CHANNELS.find((club) => normalizedLower(club.joinCode) === safe) ?? null;
+  if (typeof store.getClubByJoinCode === 'function') {
+    const club = await store.getClubByJoinCode(safe);
+    if (club) {
+      return club;
+    }
+  }
+  const clubs = await getClubs();
+  return clubs.find((club) => normalizedLower(club.joinCode) === safe) ?? null;
 }
 
 export async function searchPlayers({ ratingMin = 0, ratingMax = 9999, lat, lng, radiusKm = 25 }) {
@@ -353,7 +369,7 @@ export async function createCustomChannel(userId, channelName) {
     });
   }
 
-  ensureChannelSeed(channelKey, name);
+  await ensureChannelSeed(channelKey, name);
 
   return {
     key: channelKey,
@@ -368,7 +384,7 @@ export async function joinClubByCode(userId, code) {
     throw new Error('User not found');
   }
 
-  const club = getClubByCode(code);
+  const club = await getClubByCode(code);
   if (!club) {
     throw new Error('Code club invalide');
   }
@@ -384,7 +400,7 @@ export async function joinClubByCode(userId, code) {
     });
   }
 
-  ensureChannelSeed(club.key, club.title);
+  await ensureChannelSeed(club.key, club.title);
 
   return {
     joined: true,
@@ -408,14 +424,19 @@ export async function getCrewOverview(userId, cityOverride) {
 
   const city = normalize(cityOverride ?? user.city ?? 'Lyon') || 'Lyon';
   const regionKey = cityChannelKey(city);
-  ensureChannelSeed('france', 'France');
-  ensureChannelSeed(regionKey, city);
+  await ensureChannelSeed('france', 'France');
+  await ensureChannelSeed(regionKey, city);
 
   const leaderboard = await getCityLeaderboard(city);
   const friendIds = user.friends ?? [];
   const friendUsers = await Promise.all(friendIds.map((id) => store.getUserById(id)));
 
   const community = getCommunityState(user);
+  const customChannels = await Promise.all(community.customChannels.map(async (key) => ({
+    key,
+    title: await channelTitleFromKey(key),
+    type: 'custom',
+  })));
   const publicChannels = [
     {
       key: 'france',
@@ -428,25 +449,22 @@ export async function getCrewOverview(userId, cityOverride) {
       type: 'regional',
       city,
     },
-    ...community.customChannels.map((key) => ({
-      key,
-      title: channelTitleFromKey(key),
-      type: 'custom',
-    })),
+    ...customChannels,
   ];
 
+  const clubs = await getClubs();
   const clubChannels = community.joinedClubChannels.map((key) => {
-    const club = CLUB_CHANNELS.find((item) => item.key === key);
+    const club = clubs.find((item) => item.key === key);
     return {
       key,
-      title: club?.title ?? channelTitleFromKey(key),
+      title: club?.title ?? key,
       type: 'club',
       city: club?.city ?? city,
       joined: true,
     };
   });
 
-  const availableClubs = CLUB_CHANNELS.filter((club) =>
+  const availableClubs = clubs.filter((club) =>
     normalizedLower(club.city) === normalizedLower(city)
   ).map((club) => ({
     key: club.key,
@@ -473,8 +491,10 @@ export async function getCrewOverview(userId, cityOverride) {
 }
 
 export async function listChannelMessages(channel, limit = 40) {
-  const items = channelMessages.get(channel) ?? [];
-  return items.slice(-Math.max(1, Math.min(100, limit)));
+  if (typeof store.listChannelMessages === 'function') {
+    return store.listChannelMessages(channel, limit);
+  }
+  return [];
 }
 
 export async function postChannelMessage({ userId, channel, text }) {
@@ -490,7 +510,7 @@ export async function postChannelMessage({ userId, channel, text }) {
     throw new Error('Canal non autorise');
   }
 
-  ensureChannelSeed(channel, channelTitleFromKey(channel));
+  await ensureChannelSeed(channel, await channelTitleFromKey(channel));
 
   const item = {
     id: `msg_${Date.now()}_${Math.round(Math.random() * 9999)}`,
@@ -501,7 +521,9 @@ export async function postChannelMessage({ userId, channel, text }) {
     createdAt: new Date().toISOString(),
   };
 
-  channelMessages.get(channel).push(item);
+  if (typeof store.addChannelMessage === 'function') {
+    await store.addChannelMessage(item);
+  }
   return item;
 }
 
@@ -530,9 +552,10 @@ export async function addFriend(userId, friendId) {
 }
 
 export async function listPrivateMessages(userId, friendId, limit = 60) {
-  const key = pairMessageKey(userId, friendId);
-  const items = privateMessages.get(key) ?? [];
-  return items.slice(-Math.max(1, Math.min(150, limit)));
+  if (typeof store.listPrivateMessages === 'function') {
+    return store.listPrivateMessages(userId, friendId, limit);
+  }
+  return [];
 }
 
 export async function postPrivateMessage({ fromUserId, toUserId, text }) {
@@ -546,10 +569,6 @@ export async function postPrivateMessage({ fromUserId, toUserId, text }) {
     throw new Error('Utilisateur introuvable');
   }
 
-  const key = pairMessageKey(fromUserId, toUserId);
-  if (!privateMessages.has(key)) {
-    privateMessages.set(key, []);
-  }
   const message = {
     id: `dm_${Date.now()}_${Math.round(Math.random() * 9999)}`,
     fromUserId,
@@ -557,6 +576,8 @@ export async function postPrivateMessage({ fromUserId, toUserId, text }) {
     text: text.trim(),
     createdAt: new Date().toISOString(),
   };
-  privateMessages.get(key).push(message);
+  if (typeof store.addPrivateMessage === 'function') {
+    await store.addPrivateMessage(message);
+  }
   return message;
 }

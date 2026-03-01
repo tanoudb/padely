@@ -24,9 +24,29 @@ export async function evaluateBadges(userId) {
     badges.push('Smash-Master');
   }
 
+  const unlocked = [];
+  if (typeof store.unlockBadge === 'function') {
+    for (const badgeKey of badges) {
+      const result = await store.unlockBadge(userId, badgeKey, {
+        source: 'evaluateBadges',
+      });
+      unlocked.push({
+        badge: badgeKey,
+        unlockedAt: result.unlockedAt,
+        isNew: result.created,
+      });
+    }
+  }
+
+  const persisted = typeof store.listBadgesForUser === 'function'
+    ? await store.listBadgesForUser(userId)
+    : badges.map((badge) => ({ badgeKey: badge, unlockedAt: null }));
+
   return {
     userId,
-    badges,
+    badges: persisted.map((entry) => entry.badgeKey),
+    unlocked,
+    total: persisted.length,
   };
 }
 
