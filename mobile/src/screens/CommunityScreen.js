@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as Location from 'expo-location';
 import { LinearGradient } from 'expo-linear-gradient';
 import { api } from '../api/client';
@@ -84,7 +84,8 @@ function DmBubble({ mine, text, createdAt }) {
 }
 
 function messageKey(item, index, prefix = 'msg') {
-  const base = item?.id ?? `${item?.senderId ?? 'u'}_${item?.createdAt ?? 't'}`;
+  const base = item?.id
+    ?? `${item?.channel ?? 'ch'}_${item?.senderId ?? 'u'}_${item?.createdAt ?? 't'}_${(item?.text ?? '').slice(0, 24)}`;
   return `${prefix}_${base}_${index}`;
 }
 
@@ -146,6 +147,7 @@ export function CommunityScreen() {
   const [clubCode, setClubCode] = useState('');
   const [clubQrOpen, setClubQrOpen] = useState(false);
   const [error, setError] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
 
   const greeting = useMemo(() => greetingLine(user.displayName, t), [user.displayName, t]);
 
@@ -378,8 +380,25 @@ export function CommunityScreen() {
     return ok;
   }
 
+  async function onRefresh() {
+    setRefreshing(true);
+    try {
+      await refreshCrew();
+      if (selectedFriend) {
+        const list = await api.privateMessages(token, selectedFriend);
+        setDmMessages(list);
+      }
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
   return (
-    <ScrollView style={styles.root} contentContainerStyle={styles.content}>
+    <ScrollView
+      style={styles.root}
+      contentContainerStyle={styles.content}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.accent2} />}
+    >
       <LinearGradient colors={['#163448', '#0C2333', '#081823']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
         <Text style={styles.heroTitle}>{t('community.title')}</Text>
         <Text style={styles.heroGreeting}>{greeting}</Text>

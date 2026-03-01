@@ -1,15 +1,22 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Modal,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Switch,
   Text,
   View,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { api } from '../api/client';
 import { Card } from '../components/Card';
+import { LeaderboardRow } from '../components/LeaderboardRow';
+import { PirGauge } from '../components/PirGauge';
+import { PirSparkline } from '../components/PirSparkline';
+import { RankBadge } from '../components/RankBadge';
+import { StatPill } from '../components/StatPill';
 import { useI18n } from '../state/i18n';
 import { useSession } from '../state/session';
 import { useUi } from '../state/ui';
@@ -17,6 +24,8 @@ import { theme } from '../theme';
 import { configureEngagementNotifications } from '../utils/notifications';
 
 function rankFromRating(rating) {
+  if (rating >= 2100) return 'Or I';
+  if (rating >= 1800) return 'Argent II';
   if (rating >= 1500) return 'Argent I';
   if (rating >= 1400) return 'Bronze V';
   if (rating >= 1300) return 'Bronze IV';
@@ -56,11 +65,15 @@ function countStreakDays(matches) {
 
 export function HomeScreen({ onNavigate }) {
   const { token, user, logout, updateSettings } = useSession();
-  const { mode, setMode } = useUi();
+  const { mode, setMode, palette } = useUi();
   const { language, setLanguage, t } = useI18n();
+
   const [dashboard, setDashboard] = useState(null);
   const [recentMatches, setRecentMatches] = useState([]);
+  const [cityLeaderboards, setCityLeaderboards] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+
   const [pointRule, setPointRule] = useState(user.settings?.pointRule ?? 'punto_de_oro');
   const [matchFormat, setMatchFormat] = useState(user.settings?.matchFormat ?? 'marathon');
   const [defaultMatchMode, setDefaultMatchMode] = useState(user.settings?.defaultMatchMode ?? 'ranked');
@@ -74,21 +87,21 @@ export function HomeScreen({ onNavigate }) {
   const [appearanceMode, setAppearanceMode] = useState(user.settings?.appearanceMode ?? mode);
   const [languageChoice, setLanguageChoice] = useState(user.settings?.language ?? language);
   const [saveFeedback, setSaveFeedback] = useState('');
-  const [cityLeaderboards, setCityLeaderboards] = useState(null);
 
-  useEffect(() => {
-    Promise.all([
+  const loadHome = useCallback(async () => {
+    const [dash, periods, matchesOut] = await Promise.all([
       api.dashboard(token, user.id),
       api.leaderboardPeriods(token, user.city ?? 'Lyon'),
       api.listMyMatches(token),
-    ])
-      .then(([dash, periods, matchesOut]) => {
-        setDashboard(dash);
-        setCityLeaderboards(periods);
-        setRecentMatches(matchesOut);
-      })
-      .catch(() => {});
+    ]);
+    setDashboard(dash);
+    setCityLeaderboards(periods);
+    setRecentMatches(matchesOut);
   }, [token, user.id, user.city]);
+
+  useEffect(() => {
+    loadHome().catch(() => {});
+  }, [loadHome]);
 
   useEffect(() => {
     setPointRule(user.settings?.pointRule ?? 'punto_de_oro');
@@ -111,25 +124,32 @@ export function HomeScreen({ onNavigate }) {
   const losses = dashboard?.losses ?? 0;
   const matches = dashboard?.matches ?? 0;
 
-  const winRate = useMemo(() => {
-    if (!matches) return 0;
-    return Math.round((wins / matches) * 100);
-  }, [wins, matches]);
-
+  const winRate = useMemo(() => (matches ? Math.round((wins / matches) * 100) : 0), [wins, matches]);
   const streakDays = useMemo(() => countStreakDays(recentMatches), [recentMatches]);
 
   const motivationalMessage = useMemo(() => {
-    if (matches < 3) {
-      return t('home.motivationStart');
-    }
-    if (winRate >= 70) {
-      return t('home.motivationHot');
-    }
-    if (winRate >= 50) {
-      return t('home.motivationSteady');
-    }
+    if (matches < 3) return t('home.motivationStart');
+    if (winRate >= 70) return t('home.motivationHot');
+    if (winRate >= 50) return t('home.motivationSteady');
     return t('home.motivationRecovery');
-  }, [matches, t, winRate]);
+  }, [matches, winRate, t]);
+
+  const topRows = (cityLeaderboards?.month?.rows ?? []).slice(0, 3);
+  const progression = dashboard?.progression ?? [];
+  const pirHistory = progression.map((point) => ({
+    date: point.at,
+    value: Number(point.pir ?? point.rating ?? 0),
+  }));
+  const lastDelta = Number(progression.at(-1)?.delta ?? 0);
+
+  async function onRefresh() {
+    setRefreshing(true);
+    try {
+      await loadHome();
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   async function savePrefs() {
     setSaveFeedback('');
@@ -173,133 +193,98 @@ export function HomeScreen({ onNavigate }) {
 
   return (
     <>
-      <ScrollView style={styles.root} contentContainerStyle={styles.content}>
+      <ScrollView
+        style={styles.root}
+        contentContainerStyle={styles.content}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.accent2} />}
+      >
         <View style={styles.headerRow}>
-          <View>
-            <Text style={styles.eyebrow}>{t('home.center')}</Text>
-            <Text style={styles.h1}>{t('home.hello', { name: user.displayName })}</Text>
-            <Text style={styles.pitch}>{t('home.pitch')}</Text>
-          </View>
-          <Pressable style={styles.gearBtn} onPress={() => setSettingsOpen(true)}>
-            <Text style={styles.gearText}>⚙</Text>
+          <Text style={[styles.h1, { color: palette.text }]}>{t('home.hello', { name: user.displayName })}</Text>
+          <Pressable style={[styles.gearBtn, { backgroundColor: palette.cardStrong, borderColor: palette.line }]} onPress={() => setSettingsOpen(true)}>
+            <Text style={[styles.gearText, { color: palette.text }]}>⚙</Text>
           </Pressable>
         </View>
 
-        <Card elevated style={styles.launchPad}>
-          <Text style={styles.launchTitle}>{t('home.launchTitle')}</Text>
-          <View style={styles.launchActions}>
-            <Pressable style={styles.launchBtnPrimary} onPress={() => onNavigate?.('play')}>
-              <Text style={styles.launchBtnPrimaryText}>{t('home.launchRanked')}</Text>
+        <Card elevated style={styles.heroCard}>
+          <View style={styles.heroHead}>
+            <Text style={[styles.eyebrow, { color: palette.accent2 }]}>{t('home.pirLive')}</Text>
+            <RankBadge rank={rankFromRating(rating)} />
+          </View>
+
+          <PirGauge pir={pir} delta={lastDelta} rank={rankFromRating(rating)} />
+          <PirSparkline data={pirHistory} />
+
+          <View style={styles.pillsRow}>
+            <StatPill value={wins} label={t('home.wins')} />
+            <StatPill value={`${winRate}%`} label={t('home.winRate')} highlight />
+            <StatPill value={`🔥 ${streakDays}`} label={t('home.streak')} />
+          </View>
+        </Card>
+
+        <Card elevated>
+          <Text style={[styles.sectionTitle, { color: palette.text }]}>{t('home.launchTitle')}</Text>
+          <View style={styles.quickRow}>
+            <Pressable style={[styles.quickBtnPrimary, { backgroundColor: palette.accent }]} onPress={() => onNavigate?.('play')}>
+              <Text style={styles.quickBtnPrimaryText}>{t('home.launchRanked')}</Text>
             </Pressable>
-            <Pressable style={styles.launchBtnGhost} onPress={() => onNavigate?.('crew')}>
-              <Text style={styles.launchBtnGhostText}>{t('home.launchFind')}</Text>
+            <Pressable style={[styles.quickBtnGhost, { borderColor: palette.line, backgroundColor: palette.chip }]} onPress={() => onNavigate?.('crew')}>
+              <Text style={[styles.quickBtnGhostText, { color: palette.text }]}>{t('home.launchFind')}</Text>
             </Pressable>
           </View>
         </Card>
 
-        <Card elevated style={styles.hero}>
-          <Text style={styles.heroLabel}>{t('home.pirLive')}</Text>
-          <Text style={styles.heroValue}>{Math.round(pir)}</Text>
-          <Text style={styles.heroMeta}>{t('home.heroRank', { rank: rankFromRating(rating), rating: Math.round(rating) })}</Text>
-          <View style={styles.progressTrack}>
-            <View style={[styles.progressFill, { width: `${Math.max(8, Math.min(100, pir))}%` }]} />
-          </View>
-        </Card>
-
-        <View style={styles.grid}>
-          <Card style={styles.metricCard}>
-            <Text style={styles.metricLabel}>{t('home.wins')}</Text>
-            <Text style={styles.metricValue}>{wins}</Text>
-          </Card>
-          <Card style={styles.metricCard}>
-            <Text style={styles.metricLabel}>{t('home.losses')}</Text>
-            <Text style={styles.metricValue}>{losses}</Text>
-          </Card>
-          <Card style={styles.metricCard}>
-            <Text style={styles.metricLabel}>{t('home.winRate')}</Text>
-            <Text style={styles.metricValue}>{winRate}%</Text>
-          </Card>
-          <Card style={styles.metricCard}>
-            <Text style={styles.metricLabel}>{t('home.matches')}</Text>
-            <Text style={styles.metricValue}>{matches}</Text>
-          </Card>
-        </View>
-
         <Card>
-          <Text style={styles.sectionTitle}>{t('home.monthlyGoal')}</Text>
-          <Text style={styles.sectionText}>{t('home.monthlyGoalBody', { points: Math.max(0, 1500 - Math.round(rating)) })}</Text>
-        </Card>
-
-        <Card>
-          <Text style={styles.sectionTitle}>{t('home.coachingFocus')}</Text>
-          <Text style={styles.sectionText}>{motivationalMessage}</Text>
-        </Card>
-
-        <View style={styles.grid}>
-          <Card style={styles.metricCard}>
-            <Text style={styles.metricLabel}>{t('home.streak')}</Text>
-            <Text style={styles.metricValue}>{streakDays} {t('home.daysShort')}</Text>
-          </Card>
-        </View>
-
-        <Card>
-          <Text style={styles.sectionTitle}>{t('home.cityRanking', { city: user.city ?? 'Lyon' })}</Text>
-          <View style={styles.rankGroup}>
-            <Text style={styles.rankTitle}>{t('home.dayRank')}</Text>
-            {(cityLeaderboards?.day?.rows ?? []).slice(0, 3).map((row) => (
-              <View style={styles.rankRow} key={`d-${row.userId}`}>
-                <Text style={styles.rankLine}>#{row.rank} {row.displayName}</Text>
-                <Text style={styles.rankScore}>{Math.round(row.rankingScore ?? row.rating)}</Text>
-              </View>
+          <Text style={[styles.sectionTitle, { color: palette.text }]}>{t('home.cityRanking', { city: user.city ?? 'Lyon' })}</Text>
+          <View style={styles.boardRows}>
+            {topRows.map((row) => (
+              <LeaderboardRow key={row.userId} row={row} podium />
             ))}
-          </View>
-          <View style={styles.rankGroup}>
-            <Text style={styles.rankTitle}>{t('home.weekRank')}</Text>
-            {(cityLeaderboards?.week?.rows ?? []).slice(0, 3).map((row) => (
-              <View style={styles.rankRow} key={`w-${row.userId}`}>
-                <Text style={styles.rankLine}>#{row.rank} {row.displayName}</Text>
-                <Text style={styles.rankScore}>{Math.round(row.rankingScore ?? row.rating)}</Text>
-              </View>
-            ))}
-          </View>
-          <View style={styles.rankGroup}>
-            <Text style={styles.rankTitle}>{t('home.monthRank')}</Text>
-            {(cityLeaderboards?.month?.rows ?? []).slice(0, 3).map((row) => (
-              <View style={styles.rankRow} key={`m-${row.userId}`}>
-                <Text style={styles.rankLine}>#{row.rank} {row.displayName}</Text>
-                <Text style={styles.rankScore}>{Math.round(row.rankingScore ?? row.rating)}</Text>
-              </View>
-            ))}
+            {topRows.length === 0 ? (
+              <Text style={[styles.empty, { color: palette.muted }]}>Aucune donnee de classement.</Text>
+            ) : null}
           </View>
         </Card>
 
-        <Pressable style={styles.logout} onPress={logout}>
-          <Text style={styles.logoutLabel}>{t('home.logout')}</Text>
+        <LinearGradient
+          colors={mode === 'day' ? ['#FFF4D6', '#F7FAFF'] : ['#153348', '#10283A']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={[styles.motivation, { borderColor: palette.line }]}
+        >
+          <Text style={[styles.sectionTitle, { color: palette.text }]}>{t('home.coachingFocus')}</Text>
+          <Text style={[styles.motivationText, { color: palette.muted }]}>{motivationalMessage}</Text>
+          <Text style={[styles.motivationMeta, { color: palette.text }]}>
+            {t('home.monthlyGoalBody', { points: Math.max(0, 1500 - Math.round(rating)) })}
+          </Text>
+        </LinearGradient>
+
+        <Pressable style={[styles.logout, { backgroundColor: palette.cardStrong, borderColor: palette.line }]} onPress={logout}>
+          <Text style={[styles.logoutLabel, { color: palette.text }]}>{t('home.logout')}</Text>
         </Pressable>
       </ScrollView>
 
       <Modal visible={settingsOpen} transparent animationType="fade" onRequestClose={() => setSettingsOpen(false)}>
         <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>{t('home.settingsTitle')}</Text>
+          <View style={[styles.modalCard, { backgroundColor: palette.card, borderColor: palette.line }]}>
+            <Text style={[styles.modalTitle, { color: palette.text }]}>{t('home.settingsTitle')}</Text>
 
-            <Text style={styles.modalLabel}>{t('home.pointRule')}</Text>
+            <Text style={[styles.modalLabel, { color: palette.muted }]}>{t('home.pointRule')}</Text>
             <View style={styles.choiceRow}>
               <Pressable
-                style={[styles.choiceBtn, pointRule === 'punto_de_oro' && styles.choiceBtnActive]}
+                style={[styles.choiceBtn, { borderColor: palette.line, backgroundColor: palette.chip }, pointRule === 'punto_de_oro' && styles.choiceBtnActive]}
                 onPress={() => setPointRule('punto_de_oro')}
               >
-                <Text style={[styles.choiceText, pointRule === 'punto_de_oro' && styles.choiceTextActive]}>{t('home.pointPunto')}</Text>
+                <Text style={[styles.choiceText, { color: palette.text }, pointRule === 'punto_de_oro' && styles.choiceTextActive]}>{t('home.pointPunto')}</Text>
               </Pressable>
               <Pressable
-                style={[styles.choiceBtn, pointRule === 'avantage' && styles.choiceBtnActive]}
+                style={[styles.choiceBtn, { borderColor: palette.line, backgroundColor: palette.chip }, pointRule === 'avantage' && styles.choiceBtnActive]}
                 onPress={() => setPointRule('avantage')}
               >
-                <Text style={[styles.choiceText, pointRule === 'avantage' && styles.choiceTextActive]}>{t('home.pointAdv')}</Text>
+                <Text style={[styles.choiceText, { color: palette.text }, pointRule === 'avantage' && styles.choiceTextActive]}>{t('home.pointAdv')}</Text>
               </Pressable>
             </View>
 
-            <Text style={styles.modalLabel}>{t('home.matchFormat')}</Text>
+            <Text style={[styles.modalLabel, { color: palette.muted }]}>{t('home.matchFormat')}</Text>
             <View style={styles.choiceWrap}>
               {[
                 { key: 'standard', label: t('home.standard') },
@@ -308,112 +293,99 @@ export function HomeScreen({ onNavigate }) {
               ].map((item) => (
                 <Pressable
                   key={item.key}
-                  style={[styles.choiceBtnWide, matchFormat === item.key && styles.choiceBtnActive]}
+                  style={[styles.choiceBtnWide, { borderColor: palette.line, backgroundColor: palette.chip }, matchFormat === item.key && styles.choiceBtnActive]}
                   onPress={() => setMatchFormat(item.key)}
                 >
-                  <Text style={[styles.choiceText, matchFormat === item.key && styles.choiceTextActive]}>{item.label}</Text>
+                  <Text style={[styles.choiceText, { color: palette.text }, matchFormat === item.key && styles.choiceTextActive]}>{item.label}</Text>
                 </Pressable>
               ))}
             </View>
 
-            <Text style={styles.modalLabel}>{t('home.modeDefault')}</Text>
+            <Text style={[styles.modalLabel, { color: palette.muted }]}>{t('home.modeDefault')}</Text>
             <View style={styles.choiceRow}>
               <Pressable
-                style={[styles.choiceBtn, defaultMatchMode === 'ranked' && styles.choiceBtnActive]}
+                style={[styles.choiceBtn, { borderColor: palette.line, backgroundColor: palette.chip }, defaultMatchMode === 'ranked' && styles.choiceBtnActive]}
                 onPress={() => setDefaultMatchMode('ranked')}
               >
-                <Text style={[styles.choiceText, defaultMatchMode === 'ranked' && styles.choiceTextActive]}>{t('home.ranked')}</Text>
+                <Text style={[styles.choiceText, { color: palette.text }, defaultMatchMode === 'ranked' && styles.choiceTextActive]}>{t('home.ranked')}</Text>
               </Pressable>
               <Pressable
-                style={[styles.choiceBtn, defaultMatchMode === 'friendly' && styles.choiceBtnActive]}
+                style={[styles.choiceBtn, { borderColor: palette.line, backgroundColor: palette.chip }, defaultMatchMode === 'friendly' && styles.choiceBtnActive]}
                 onPress={() => setDefaultMatchMode('friendly')}
               >
-                <Text style={[styles.choiceText, defaultMatchMode === 'friendly' && styles.choiceTextActive]}>{t('home.friendly')}</Text>
+                <Text style={[styles.choiceText, { color: palette.text }, defaultMatchMode === 'friendly' && styles.choiceTextActive]}>{t('home.friendly')}</Text>
               </Pressable>
             </View>
 
-            <Text style={styles.modalLabel}>{t('home.appearance')}</Text>
+            <Text style={[styles.modalLabel, { color: palette.muted }]}>{t('home.appearance')}</Text>
             <View style={styles.choiceRow}>
               <Pressable
-                style={[styles.choiceBtn, appearanceMode === 'night' && styles.choiceBtnActive]}
-                onPress={() => {
-                  setAppearanceMode('night');
-                  setMode('night');
-                }}
+                style={[styles.choiceBtn, { borderColor: palette.line, backgroundColor: palette.chip }, appearanceMode === 'night' && styles.choiceBtnActive]}
+                onPress={() => setAppearanceMode('night')}
               >
-                <Text style={[styles.choiceText, appearanceMode === 'night' && styles.choiceTextActive]}>{t('home.night')}</Text>
+                <Text style={[styles.choiceText, { color: palette.text }, appearanceMode === 'night' && styles.choiceTextActive]}>{t('home.night')}</Text>
               </Pressable>
               <Pressable
-                style={[styles.choiceBtn, appearanceMode === 'day' && styles.choiceBtnActive]}
-                onPress={() => {
-                  setAppearanceMode('day');
-                  setMode('day');
-                }}
+                style={[styles.choiceBtn, { borderColor: palette.line, backgroundColor: palette.chip }, appearanceMode === 'day' && styles.choiceBtnActive]}
+                onPress={() => setAppearanceMode('day')}
               >
-                <Text style={[styles.choiceText, appearanceMode === 'day' && styles.choiceTextActive]}>{t('home.day')}</Text>
+                <Text style={[styles.choiceText, { color: palette.text }, appearanceMode === 'day' && styles.choiceTextActive]}>{t('home.day')}</Text>
               </Pressable>
             </View>
 
-            <Text style={styles.modalLabel}>{t('home.language')}</Text>
+            <Text style={[styles.modalLabel, { color: palette.muted }]}>{t('home.language')}</Text>
             <View style={styles.choiceRow}>
               <Pressable
-                style={[styles.choiceBtn, languageChoice === 'fr' && styles.choiceBtnActive]}
-                onPress={() => {
-                  setLanguageChoice('fr');
-                  setLanguage('fr');
-                }}
+                style={[styles.choiceBtn, { borderColor: palette.line, backgroundColor: palette.chip }, languageChoice === 'fr' && styles.choiceBtnActive]}
+                onPress={() => setLanguageChoice('fr')}
               >
-                <Text style={[styles.choiceText, languageChoice === 'fr' && styles.choiceTextActive]}>FR</Text>
+                <Text style={[styles.choiceText, { color: palette.text }, languageChoice === 'fr' && styles.choiceTextActive]}>FR</Text>
               </Pressable>
               <Pressable
-                style={[styles.choiceBtn, languageChoice === 'en' && styles.choiceBtnActive]}
-                onPress={() => {
-                  setLanguageChoice('en');
-                  setLanguage('en');
-                }}
+                style={[styles.choiceBtn, { borderColor: palette.line, backgroundColor: palette.chip }, languageChoice === 'en' && styles.choiceBtnActive]}
+                onPress={() => setLanguageChoice('en')}
               >
-                <Text style={[styles.choiceText, languageChoice === 'en' && styles.choiceTextActive]}>EN</Text>
+                <Text style={[styles.choiceText, { color: palette.text }, languageChoice === 'en' && styles.choiceTextActive]}>EN</Text>
               </Pressable>
             </View>
 
             <View style={styles.switchRow}>
-              <Text style={styles.switchLabel}>{t('home.autoSave')}</Text>
+              <Text style={[styles.switchLabel, { color: palette.muted }]}>{t('home.autoSave')}</Text>
               <Switch value={autoSaveMatch} onValueChange={setAutoSaveMatch} />
             </View>
             <View style={styles.switchRow}>
-              <Text style={styles.switchLabel}>{t('home.notifPartner')}</Text>
+              <Text style={[styles.switchLabel, { color: palette.muted }]}>{t('home.notifPartner')}</Text>
               <Switch value={notifPartner} onValueChange={setNotifPartner} />
             </View>
             <View style={styles.switchRow}>
-              <Text style={styles.switchLabel}>{t('home.notifInvite')}</Text>
+              <Text style={[styles.switchLabel, { color: palette.muted }]}>{t('home.notifInvite')}</Text>
               <Switch value={notifMatch} onValueChange={setNotifMatch} />
             </View>
             <View style={styles.switchRow}>
-              <Text style={styles.switchLabel}>{t('home.notifLeaderboard')}</Text>
+              <Text style={[styles.switchLabel, { color: palette.muted }]}>{t('home.notifLeaderboard')}</Text>
               <Switch value={notifLeaderboard} onValueChange={setNotifLeaderboard} />
             </View>
-
             <View style={styles.switchRow}>
-              <Text style={styles.switchLabel}>{t('home.publicProfile')}</Text>
+              <Text style={[styles.switchLabel, { color: palette.muted }]}>{t('home.publicProfile')}</Text>
               <Switch value={publicProfile} onValueChange={setPublicProfile} />
             </View>
             <View style={styles.switchRow}>
-              <Text style={styles.switchLabel}>{t('home.showGuest')}</Text>
+              <Text style={[styles.switchLabel, { color: palette.muted }]}>{t('home.showGuest')}</Text>
               <Switch value={showGuestMatches} onValueChange={setShowGuestMatches} />
             </View>
             <View style={styles.switchRow}>
-              <Text style={styles.switchLabel}>{t('home.showHealth')}</Text>
+              <Text style={[styles.switchLabel, { color: palette.muted }]}>{t('home.showHealth')}</Text>
               <Switch value={showHealthStats} onValueChange={setShowHealthStats} />
             </View>
 
-            {!!saveFeedback && <Text style={styles.feedback}>{saveFeedback}</Text>}
+            {!!saveFeedback && <Text style={[styles.feedback, { color: palette.accent2 }]}>{saveFeedback}</Text>}
 
             <View style={styles.modalActions}>
-              <Pressable style={styles.modalBtn} onPress={savePrefs}>
+              <Pressable style={[styles.modalBtn, { backgroundColor: palette.accent }]} onPress={savePrefs}>
                 <Text style={styles.modalBtnText}>{t('home.save')}</Text>
               </Pressable>
-              <Pressable style={[styles.modalBtn, styles.modalBtnGhost]} onPress={() => setSettingsOpen(false)}>
-                <Text style={[styles.modalBtnText, styles.modalBtnGhostText]}>{t('home.close')}</Text>
+              <Pressable style={[styles.modalBtn, { borderColor: palette.line, backgroundColor: palette.chip }]} onPress={() => setSettingsOpen(false)}>
+                <Text style={[styles.modalBtnText, { color: palette.text }]}>{t('home.close')}</Text>
               </Pressable>
             </View>
           </View>
@@ -425,217 +397,180 @@ export function HomeScreen({ onNavigate }) {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: 'transparent' },
-  content: { padding: 16, gap: 12, paddingBottom: 24 },
-  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
-  eyebrow: {
-    color: theme.colors.accent2,
-    fontFamily: theme.fonts.mono,
-    letterSpacing: 1,
-    fontSize: 11,
-  },
-  h1: {
-    color: theme.colors.text,
-    fontSize: 40,
-    lineHeight: 42,
-    fontFamily: theme.fonts.display,
-  },
-  pitch: {
-    color: '#C4D9E7',
-    fontFamily: theme.fonts.body,
-    fontSize: 13,
-    marginTop: 4,
-    maxWidth: 290,
-  },
+  content: { padding: 16, gap: 12, paddingBottom: 26 },
+  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  h1: { fontFamily: theme.fonts.display, fontSize: 38, lineHeight: 40 },
+  eyebrow: { fontFamily: theme.fonts.mono, fontSize: 11, letterSpacing: 1 },
   gearBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    backgroundColor: '#2B5873',
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+  },
+  gearText: { fontSize: 20 },
+  heroCard: { gap: 8 },
+  heroHead: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  pillsRow: { flexDirection: 'row', gap: 8, marginTop: 2 },
+  quickRow: { flexDirection: 'row', gap: 8, marginTop: 6 },
+  quickBtnPrimary: {
+    flex: 1,
+    minHeight: 52,
+    borderRadius: 14,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  gearText: { color: '#EAF5FF', fontSize: 20 },
-  hero: {
-    gap: 4,
-  },
-  launchPad: {
-    gap: 10,
-  },
-  launchTitle: {
-    color: '#F4D35E',
+  quickBtnPrimaryText: {
+    color: '#3A2500',
     fontFamily: theme.fonts.title,
     textTransform: 'uppercase',
     letterSpacing: 0.7,
     fontSize: 12,
   },
-  launchActions: {
-    gap: 8,
-  },
-  launchBtnPrimary: {
-    minHeight: 48,
-    borderRadius: 12,
-    backgroundColor: theme.colors.accent,
+  quickBtnGhost: {
+    flex: 1,
+    minHeight: 52,
+    borderRadius: 14,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  launchBtnPrimaryText: {
-    color: '#3A2500',
-    fontFamily: theme.fonts.title,
-    textTransform: 'uppercase',
-    fontSize: 12,
-    letterSpacing: 0.6,
-  },
-  launchBtnGhost: {
-    minHeight: 44,
-    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#4F7087',
-    backgroundColor: 'rgba(22, 51, 72, 0.75)',
-    justifyContent: 'center',
-    alignItems: 'center',
   },
-  launchBtnGhostText: {
-    color: '#D9ECF8',
+  quickBtnGhostText: {
     fontFamily: theme.fonts.title,
     textTransform: 'uppercase',
-    fontSize: 11,
-  },
-  heroLabel: {
-    color: theme.colors.accent,
-    fontFamily: theme.fonts.mono,
-    fontSize: 11,
-    letterSpacing: 1,
-  },
-  heroValue: {
-    color: theme.colors.text,
-    fontSize: 68,
-    lineHeight: 70,
-    fontFamily: theme.fonts.display,
-  },
-  heroMeta: {
-    color: theme.colors.muted,
-    fontFamily: theme.fonts.body,
-    marginBottom: 8,
-  },
-  progressTrack: {
-    height: 12,
-    borderRadius: 99,
-    overflow: 'hidden',
-    backgroundColor: '#143246',
-  },
-  progressFill: {
-    height: 12,
-    backgroundColor: theme.colors.accent,
-  },
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-  },
-  metricCard: {
-    width: '48.5%',
-    gap: 2,
-  },
-  metricLabel: {
-    color: theme.colors.muted,
-    fontFamily: theme.fonts.body,
+    letterSpacing: 0.7,
     fontSize: 12,
   },
-  metricValue: {
-    color: theme.colors.text,
-    fontFamily: theme.fonts.title,
-    fontSize: 28,
+  sectionTitle: { fontFamily: theme.fonts.title, fontSize: 16 },
+  boardRows: { gap: 8, marginTop: 8 },
+  empty: { fontFamily: theme.fonts.body, fontSize: 13 },
+  motivation: {
+    borderRadius: 20,
+    borderWidth: 1,
+    padding: 16,
+    gap: 6,
   },
-  sectionTitle: {
-    color: theme.colors.text,
-    fontFamily: theme.fonts.title,
-    fontSize: 16,
-    marginBottom: 6,
-  },
-  sectionText: {
-    color: theme.colors.muted,
+  motivationText: {
     fontFamily: theme.fonts.body,
     fontSize: 13,
   },
-  rankGroup: { marginBottom: 8 },
-  rankTitle: { color: theme.colors.accent, fontFamily: theme.fonts.title, marginBottom: 4, fontSize: 12, textTransform: 'uppercase' },
-  rankRow: { flexDirection: 'row', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: 'rgba(157,185,203,0.2)', paddingVertical: 5 },
-  rankLine: { color: theme.colors.text, fontFamily: theme.fonts.body, fontSize: 12 },
-  rankScore: { color: theme.colors.accent2, fontFamily: theme.fonts.title, fontSize: 12 },
+  motivationMeta: {
+    fontFamily: theme.fonts.title,
+    fontSize: 12,
+    marginTop: 2,
+  },
   logout: {
-    marginTop: 8,
     minHeight: 50,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: theme.colors.line,
+    borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(16, 43, 60, 0.7)',
+    borderWidth: 1,
   },
   logoutLabel: {
-    color: theme.colors.text,
     fontFamily: theme.fonts.title,
     textTransform: 'uppercase',
-    letterSpacing: 1,
+    letterSpacing: 0.8,
     fontSize: 12,
   },
   modalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(5, 11, 19, 0.84)',
+    backgroundColor: 'rgba(4, 8, 14, 0.72)',
     justifyContent: 'center',
-    padding: 16,
+    padding: 18,
   },
   modalCard: {
-    backgroundColor: '#0F2433',
-    borderRadius: 16,
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#375E76',
-    padding: 14,
-    gap: 10,
+    padding: 16,
+    gap: 8,
   },
-  modalTitle: { color: theme.colors.text, fontFamily: theme.fonts.title, fontSize: 16 },
-  modalLabel: { color: theme.colors.muted, fontFamily: theme.fonts.body, fontSize: 12 },
-  choiceRow: { flexDirection: 'row', gap: 8 },
-  choiceWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  modalTitle: {
+    fontFamily: theme.fonts.title,
+    fontSize: 18,
+    marginBottom: 2,
+  },
+  modalLabel: {
+    marginTop: 6,
+    fontFamily: theme.fonts.body,
+    fontSize: 12,
+  },
+  choiceRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  choiceWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
   choiceBtn: {
     flex: 1,
-    minHeight: 42,
-    borderRadius: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#456880',
-    backgroundColor: '#173245',
-  },
-  choiceBtnWide: {
     minHeight: 40,
     borderRadius: 10,
+    borderWidth: 1,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  choiceBtnWide: {
+    minWidth: 94,
+    minHeight: 40,
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#456880',
-    backgroundColor: '#173245',
+    justifyContent: 'center',
+    alignItems: 'center',
     paddingHorizontal: 10,
   },
   choiceBtnActive: {
-    backgroundColor: theme.colors.accent,
-    borderColor: theme.colors.accent,
+    backgroundColor: '#F4D35E',
+    borderColor: '#F4D35E',
   },
-  choiceText: { color: '#D8EBFA', fontFamily: theme.fonts.title, fontSize: 11, textTransform: 'uppercase' },
-  choiceTextActive: { color: '#3A2500' },
-  switchRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  switchLabel: { color: '#D8EBFA', fontFamily: theme.fonts.body, fontSize: 12 },
-  feedback: { color: theme.colors.warning, fontFamily: theme.fonts.body, fontSize: 12 },
-  modalActions: { flexDirection: 'row', gap: 8, marginTop: 2 },
+  choiceText: {
+    fontFamily: theme.fonts.title,
+    textTransform: 'uppercase',
+    fontSize: 11,
+    letterSpacing: 0.6,
+  },
+  choiceTextActive: {
+    color: '#3A2500',
+  },
+  switchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 34,
+  },
+  switchLabel: {
+    fontFamily: theme.fonts.body,
+    fontSize: 12,
+  },
+  feedback: {
+    marginTop: 4,
+    fontFamily: theme.fonts.body,
+    fontSize: 12,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 8,
+  },
   modalBtn: {
     flex: 1,
     minHeight: 44,
-    borderRadius: 10,
-    backgroundColor: theme.colors.accent,
+    borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 1,
   },
-  modalBtnGhost: { backgroundColor: '#29495F' },
-  modalBtnText: { color: '#3A2500', fontFamily: theme.fonts.title, textTransform: 'uppercase', fontSize: 12 },
-  modalBtnGhostText: { color: '#EAF5FF' },
+  modalBtnText: {
+    color: '#3A2500',
+    fontFamily: theme.fonts.title,
+    textTransform: 'uppercase',
+    letterSpacing: 0.7,
+    fontSize: 11,
+  },
 });

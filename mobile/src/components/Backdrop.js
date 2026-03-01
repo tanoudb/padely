@@ -29,12 +29,12 @@ export function Backdrop() {
 
   return (
     <View pointerEvents="none" style={styles.root}>
-      <View style={[styles.layer, { backgroundColor: mode === 'day' ? '#0E2332' : '#060F18' }]} />
+      <View style={[styles.layer, { backgroundColor: mode === 'day' ? '#F5F7FA' : '#060F18' }]} />
       <Animated.View
         style={[
           styles.blob,
           styles.blobA,
-          { backgroundColor: mode === 'day' ? 'rgba(255, 210, 106, 0.17)' : 'rgba(244, 211, 94, 0.14)' },
+          { backgroundColor: mode === 'day' ? 'rgba(232, 168, 0, 0.14)' : 'rgba(244, 211, 94, 0.14)' },
           {
             transform: [{
               scale: pulse.interpolate({
@@ -49,7 +49,7 @@ export function Backdrop() {
         style={[
           styles.blob,
           styles.blobB,
-          { backgroundColor: mode === 'day' ? 'rgba(36, 226, 198, 0.2)' : 'rgba(0, 209, 178, 0.16)' },
+          { backgroundColor: mode === 'day' ? 'rgba(0, 184, 156, 0.18)' : 'rgba(0, 209, 178, 0.16)' },
           {
             transform: [{
               scale: pulse.interpolate({
@@ -60,7 +60,7 @@ export function Backdrop() {
           },
         ]}
       />
-      <View style={[styles.blob, styles.blobC, { backgroundColor: `${palette.warning}22` }]} />
+      <View style={[styles.blob, styles.blobC, { backgroundColor: mode === 'day' ? '#FFD97940' : `${palette.warning}22` }]} />
     </View>
   );
 }

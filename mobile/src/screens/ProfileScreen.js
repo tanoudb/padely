@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { api } from '../api/client';
 import { Card } from '../components/Card';
 import { useI18n } from '../state/i18n';
@@ -32,17 +32,21 @@ export function ProfileScreen() {
   const [duos, setDuos] = useState([]);
   const [players, setPlayers] = useState([]);
   const [view, setView] = useState('profile');
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    Promise.all([
+  async function loadProfileData() {
+    const [db, duoStats, playerList] = await Promise.all([
       api.dashboard(token, user.id),
       api.duoStats(token, user.id),
       api.listPlayers(token),
-    ]).then(([db, duoStats, playerList]) => {
-      setDashboard(db);
-      setDuos(duoStats);
-      setPlayers(playerList);
-    }).catch(() => {});
+    ]);
+    setDashboard(db);
+    setDuos(duoStats);
+    setPlayers(playerList);
+  }
+
+  useEffect(() => {
+    loadProfileData().catch(() => {});
   }, [token, user.id]);
 
   const playersById = useMemo(() => {
@@ -71,9 +75,22 @@ export function ProfileScreen() {
     });
   }
 
+  async function onRefresh() {
+    setRefreshing(true);
+    try {
+      await loadProfileData();
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
   if (view === 'partners') {
     return (
-      <ScrollView style={styles.root} contentContainerStyle={styles.content}>
+      <ScrollView
+        style={styles.root}
+        contentContainerStyle={styles.content}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.accent2} />}
+      >
         <View style={styles.headerRow}>
           <Pressable style={styles.backBtn} onPress={() => setView('profile')}>
             <Text style={styles.backBtnText}>{t('profile.backProfile')}</Text>
@@ -114,7 +131,11 @@ export function ProfileScreen() {
   }
 
   return (
-    <ScrollView style={styles.root} contentContainerStyle={styles.content}>
+    <ScrollView
+      style={styles.root}
+      contentContainerStyle={styles.content}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.accent2} />}
+    >
       <View style={styles.header}>
         <Text style={styles.eyebrow}>{t('profile.space')}</Text>
         <Text style={styles.h1}>{t('profile.title')}</Text>

@@ -7,7 +7,7 @@ export const dictionaries = {
     tabs: {
       home: 'Accueil',
       play: 'Match',
-      social: 'Social',
+      social: 'Communaute',
       profile: 'Profil',
     },
     auth: {
@@ -260,7 +260,7 @@ export const dictionaries = {
       publish: 'Publier',
       regionalEmpty: 'Ton canal regional est vide pour l instant.',
       channelsTitle: 'Canaux communautaires',
-      channelsPitch: 'Cree tes espaces: tournoi, niveau, planning hebdo.',
+      channelsPitch: 'Cree tes espaces: tournoi, niveau, planning de match.',
       chooseChannel: 'Choisir un canal',
       newChannelPlaceholder: 'Nouveau canal (ex: tournoi-lyon)',
       create: 'Creer',
@@ -336,7 +336,7 @@ export const dictionaries = {
     tabs: {
       home: 'Home',
       play: 'Match',
-      social: 'Social',
+      social: 'Community',
       profile: 'Profile',
     },
     auth: {
@@ -589,7 +589,7 @@ export const dictionaries = {
       publish: 'Publish',
       regionalEmpty: 'Your regional channel is empty for now.',
       channelsTitle: 'Community channels',
-      channelsPitch: 'Create spaces: tournament, level, weekly planning.',
+      channelsPitch: 'Create spaces: tournament, level, match planning.',
       chooseChannel: 'Choose a channel',
       newChannelPlaceholder: 'New channel (e.g. tournament-lyon)',
       create: 'Create',

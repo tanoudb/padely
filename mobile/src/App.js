@@ -36,6 +36,8 @@ function Main() {
   const [tab, setTab] = useState('home');
   const [booting, setBooting] = useState(true);
   const tabAnim = useRef(new Animated.Value(1)).current;
+  const tabOffset = useRef(new Animated.Value(0)).current;
+  const previousTabRef = useRef('home');
 
   useEffect(() => {
     const timer = setTimeout(() => setBooting(false), 1100);
@@ -43,14 +45,26 @@ function Main() {
   }, []);
 
   useEffect(() => {
+    const order = { home: 0, play: 1, crew: 2, profile: 3 };
+    const previousTab = previousTabRef.current;
+    const direction = (order[tab] ?? 0) >= (order[previousTab] ?? 0) ? 1 : -1;
+    previousTabRef.current = tab;
+
     tabAnim.setValue(0);
+    tabOffset.setValue(direction * 30);
     Animated.timing(tabAnim, {
       toValue: 1,
       duration: 280,
-      easing: Easing.out(Easing.cubic),
+      easing: Easing.out(Easing.exp),
       useNativeDriver: true,
     }).start();
-  }, [tab, tabAnim]);
+    Animated.timing(tabOffset, {
+      toValue: 0,
+      duration: 280,
+      easing: Easing.out(Easing.exp),
+      useNativeDriver: true,
+    }).start();
+  }, [tab, tabAnim, tabOffset]);
 
   useEffect(() => {
     const appearance = user?.settings?.appearanceMode;
@@ -96,10 +110,7 @@ function Main() {
           {
             opacity: tabAnim,
             transform: [{
-              translateY: tabAnim.interpolate({
-                inputRange: [0, 1],
-                outputRange: [12, 0],
-              }),
+              translateX: tabOffset,
             }],
           },
         ]}

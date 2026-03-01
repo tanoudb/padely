@@ -3,12 +3,13 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { theme } from '../theme';
 import { useI18n } from '../state/i18n';
 import { useUi } from '../state/ui';
+import { Icon } from './Icon';
 
 const TABS = [
-  { key: 'home', i18n: 'tabs.home', icon: '◉' },
-  { key: 'play', i18n: 'tabs.play', icon: '✦' },
-  { key: 'crew', i18n: 'tabs.social', icon: '◎' },
-  { key: 'profile', i18n: 'tabs.profile', icon: '◍' },
+  { key: 'home', i18n: 'tabs.home' },
+  { key: 'play', i18n: 'tabs.play' },
+  { key: 'crew', i18n: 'tabs.social' },
+  { key: 'profile', i18n: 'tabs.profile' },
 ];
 
 export function TabBar({ active, onChange }) {
@@ -34,7 +35,12 @@ export function TabBar({ active, onChange }) {
             ]}
             onPress={() => onChange(tab.key)}
           >
-            <Text style={[styles.icon, { color: isActive ? '#3A2500' : palette.muted }]}>{tab.icon}</Text>
+            <Icon
+              name={tab.key}
+              active={isActive}
+              size={21}
+              color={isActive ? '#3A2500' : palette.muted}
+            />
             <Text style={[styles.label, { color: palette.text }, isActive && styles.labelActive]}>{t(tab.i18n)}</Text>
             {isActive ? <View style={styles.dot} /> : null}
           </Pressable>
@@ -61,7 +67,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
   },
-  icon: { fontSize: 12, marginBottom: 2 },
+  icon: { marginBottom: 2 },
   label: {
     fontFamily: theme.fonts.title,
     fontSize: 10,

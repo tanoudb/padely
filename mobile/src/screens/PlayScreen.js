@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
-  Easing,
   Modal,
   Platform,
   Pressable,
@@ -15,9 +14,12 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
+import * as Haptics from 'expo-haptics';
+import { LinearGradient } from 'expo-linear-gradient';
 import { api } from '../api/client';
 import { Card } from '../components/Card';
 import { QrScannerModal } from '../components/QrScannerModal';
+import { VictoryOverlay } from '../components/VictoryOverlay';
 import { useI18n } from '../state/i18n';
 import { useSession } from '../state/session';
 import { theme } from '../theme';
@@ -158,21 +160,45 @@ function MatchCard({ match, onValidate, onOpenPir, t }) {
   );
 }
 
-function RefereeSide({ team, serving, point, games, onPress, pointSize, gameSize, titleSize, teamLabel, gamesLabel, tapHint }) {
+function RefereeSide({
+  team,
+  serving,
+  point,
+  games,
+  onPress,
+  pointSize,
+  gameSize,
+  titleSize,
+  teamLabel,
+  gamesLabel,
+  tapHint,
+  pointPulse,
+  flashOpacity,
+}) {
   const isRed = team === 'a';
+  const gradient = isRed ? ['#7D1620', '#B5292E'] : ['#20367E', '#3457C1'];
   return (
     <Pressable style={[styles.refSide, isRed ? styles.redSide : styles.blueSide]} onPress={onPress}>
-      <Text style={[styles.refSideTitle, { fontSize: titleSize }]}>
-        {teamLabel} {serving ? '🎾' : ''}
-      </Text>
-      <Text
-        style={[styles.refPoint, { fontSize: pointSize, lineHeight: Math.round(pointSize * 1.08) }]}
+      <LinearGradient colors={gradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFill} />
+      <Animated.View pointerEvents="none" style={[styles.refFlash, { opacity: flashOpacity }]} />
+      <View style={styles.refHeadRow}>
+        <Text style={[styles.refSideTitle, { fontSize: titleSize }]}>
+          {teamLabel}
+        </Text>
+        {serving ? <View style={styles.serviceBall} /> : null}
+      </View>
+      <Animated.Text
         adjustsFontSizeToFit
         minimumFontScale={0.55}
         numberOfLines={1}
+        style={[
+          styles.refPoint,
+          { fontSize: pointSize, lineHeight: Math.round(pointSize * 1.08) },
+          { transform: [{ scale: pointPulse }] },
+        ]}
       >
         {point}
-      </Text>
+      </Animated.Text>
       <Text style={[styles.refGames, { fontSize: gameSize }]}>{gamesLabel}: {games}</Text>
       <Text style={styles.refTapHint}>{tapHint}</Text>
     </Pressable>
@@ -233,10 +259,15 @@ export function PlayScreen() {
   const [savedMatchId, setSavedMatchId] = useState(null);
   const [savedInviteUrl, setSavedInviteUrl] = useState('');
   const [pirDetail, setPirDetail] = useState(null);
+  const [victoryPirDelta, setVictoryPirDelta] = useState(0);
 
   const { width, height } = useWindowDimensions();
   const landscape = width > height;
-  const cinematicAnim = useRef(new Animated.Value(0)).current;
+  const pointPulseA = useRef(new Animated.Value(1)).current;
+  const pointPulseB = useRef(new Animated.Value(1)).current;
+  const flashA = useRef(new Animated.Value(0)).current;
+  const flashB = useRef(new Animated.Value(0)).current;
+  const prevSetGamesRef = useRef({ a: 0, b: 0, sets: 0 });
 
   const selectablePlayers = useMemo(
     () => players.filter((p) => p.id !== user.id),
@@ -318,26 +349,31 @@ export function PlayScreen() {
   }, [user.settings, defaultMatchMode]);
 
   useEffect(() => {
-    if (!score.winner) {
-      cinematicAnim.setValue(0);
-      return;
+    const prev = prevSetGamesRef.current;
+    if (score.currentSet.a > prev.a) {
+      flashA.setValue(0.55);
+      Animated.timing(flashA, { toValue: 0, duration: 260, useNativeDriver: true }).start();
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     }
+    if (score.currentSet.b > prev.b) {
+      flashB.setValue(0.55);
+      Animated.timing(flashB, { toValue: 0, duration: 260, useNativeDriver: true }).start();
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    }
+    if (score.sets.length > prev.sets) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+    }
+    prevSetGamesRef.current = {
+      a: score.currentSet.a,
+      b: score.currentSet.b,
+      sets: score.sets.length,
+    };
+  }, [score.currentSet.a, score.currentSet.b, score.sets.length, flashA, flashB]);
 
-    Animated.sequence([
-      Animated.timing(cinematicAnim, {
-        toValue: 1,
-        duration: 700,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }),
-      Animated.timing(cinematicAnim, {
-        toValue: 0.92,
-        duration: 500,
-        easing: Easing.inOut(Easing.quad),
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, [score.winner, cinematicAnim]);
+  useEffect(() => {
+    if (!score.winner) return;
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+  }, [score.winner]);
 
   useEffect(() => {
     async function autoSave() {
@@ -364,6 +400,7 @@ export function PlayScreen() {
           clubName: 'Club local',
           watchByPlayer: estimatedWatchByPlayer,
         });
+        setVictoryPirDelta(Number(out?.pirImpact?.delta ?? 0));
 
         let inviteSuffix = '';
         try {
@@ -521,6 +558,7 @@ export function PlayScreen() {
         clubName: 'Club local',
         watchByPlayer: estimatedWatchByPlayer,
       });
+      setVictoryPirDelta(Number(out?.pirImpact?.delta ?? 0));
 
       let inviteSuffix = '';
       try {
@@ -559,8 +597,25 @@ export function PlayScreen() {
     setScore(resetScore(score.config));
     setSavedMatchId(null);
     setSavedInviteUrl('');
+    setVictoryPirDelta(0);
     setFullScreenMode(false);
     setFeedback(t('play.msgNewMatchReady'));
+  }
+
+  function pulsePoint(side) {
+    const pulse = side === 'a' ? pointPulseA : pointPulseB;
+    pulse.setValue(1);
+    Animated.sequence([
+      Animated.timing(pulse, { toValue: 1.12, duration: 120, useNativeDriver: true }),
+      Animated.timing(pulse, { toValue: 1, duration: 120, useNativeDriver: true }),
+    ]).start();
+  }
+
+  function onScorePoint(side) {
+    if (score.winner) return;
+    pulsePoint(side);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    setScore((prev) => addPoint(prev, side));
   }
 
   const orientationIsLandscape = modalOrientation.includes('LANDSCAPE') || modalOrientation.includes('landscape');
@@ -819,26 +874,30 @@ export function PlayScreen() {
               serving={currentServer === slotA}
               point={slotPoint(slotA)}
               games={slotGames(slotA)}
-              onPress={() => setScore((prev) => addPoint(prev, slotA))}
+              onPress={() => onScorePoint(slotA)}
               pointSize={pointSize}
               gameSize={gameSize}
               titleSize={titleSize}
               teamLabel={slotA === 'a' ? t('play.teamRed') : t('play.teamBlue')}
               gamesLabel={t('play.games')}
               tapHint={t('play.tapPoint')}
+              pointPulse={slotA === 'a' ? pointPulseA : pointPulseB}
+              flashOpacity={slotA === 'a' ? flashA : flashB}
             />
             <RefereeSide
               team={slotB}
               serving={currentServer === slotB}
               point={slotPoint(slotB)}
               games={slotGames(slotB)}
-              onPress={() => setScore((prev) => addPoint(prev, slotB))}
+              onPress={() => onScorePoint(slotB)}
               pointSize={pointSize}
               gameSize={gameSize}
               titleSize={titleSize}
               teamLabel={slotB === 'a' ? t('play.teamRed') : t('play.teamBlue')}
               gamesLabel={t('play.games')}
               tapHint={t('play.tapPoint')}
+              pointPulse={slotB === 'a' ? pointPulseA : pointPulseB}
+              flashOpacity={slotB === 'a' ? flashA : flashB}
             />
           </View>
 
@@ -846,43 +905,27 @@ export function PlayScreen() {
             <Pressable style={[styles.actionBtn, styles.undoBtn]} onPress={() => setScore((prev) => undoPoint(prev))}>
               <Text style={styles.actionText}>{t('play.undo')}</Text>
             </Pressable>
-            <Pressable style={[styles.actionBtn, styles.resetBtn]} onPress={() => setScore(resetScore(score.config))}>
+            <Pressable style={[styles.actionBtn, styles.resetBtn]} onPress={() => setScore(() => resetScore(score.config))}>
               <Text style={styles.actionText}>{t('play.reset')}</Text>
             </Pressable>
           </View>
         </SafeAreaView>
       </Modal>
 
-      <Modal visible={Boolean(score.winner)} transparent animationType="fade">
-        <View style={styles.cinematicBackdrop}>
-          <Animated.View
-            style={[
-              styles.cinematicCard,
-              {
-                borderColor: winnerTone?.color ?? theme.colors.accent,
-                transform: [{ scale: cinematicAnim }],
-                opacity: cinematicAnim,
-              },
-            ]}
-          >
-            <Text style={styles.cinematicTitle}>{winnerTone ? t(winnerTone.titleKey) : t('play.victoryDefault')}</Text>
-            <Text style={styles.cinematicTeam}>{score.winner === 'a' ? t('play.teamRedName') : t('play.teamBlueName')}</Text>
-            <Text style={styles.cinematicSub}>{winnerTone ? t(winnerTone.subtitleKey) : ''}</Text>
-            <Text style={styles.cinematicSub}>{t('play.finalScore', { score: setsPayload.map((set) => `${set.a}-${set.b}`).join(' / ') })}</Text>
-            <Text style={styles.cinematicSub}>
-              {savedMatchId ? t('play.matchSaved', { id: savedMatchId.slice(-6) }) : t('play.matchSaving')}
-            </Text>
-            {savedInviteUrl ? (
-              <Pressable style={styles.cinematicBtnSecondary} onPress={shareInvite}>
-                <Text style={styles.cinematicBtnSecondaryText}>{t('play.share')}</Text>
-              </Pressable>
-            ) : null}
-            <Pressable style={styles.cinematicBtn} onPress={closeVictory}>
-              <Text style={styles.cinematicBtnText}>{t('play.continue')}</Text>
-            </Pressable>
-          </Animated.View>
-        </View>
-      </Modal>
+      <VictoryOverlay
+        visible={Boolean(score.winner)}
+        title={winnerTone ? t(winnerTone.titleKey) : t('play.victoryDefault')}
+        subtitle={[
+          score.winner === 'a' ? t('play.teamRedName') : t('play.teamBlueName'),
+          winnerTone ? t(winnerTone.subtitleKey) : '',
+        ].filter(Boolean).join(' · ')}
+        scoreLine={t('play.finalScore', { score: setsPayload.map((set) => `${set.a}-${set.b}`).join(' / ') })}
+        pirDelta={victoryPirDelta}
+        onShare={savedInviteUrl ? shareInvite : undefined}
+        shareLabel={t('play.share')}
+        continueLabel={t('play.continue')}
+        onContinue={closeVictory}
+      />
 
       <QrScannerModal
         visible={qrScannerOpen}
@@ -1133,9 +1176,30 @@ const styles = StyleSheet.create({
   refBoard: { flex: 1, gap: 8 },
   refBoardPortrait: { flexDirection: 'column' },
   refBoardLandscape: { flexDirection: 'row' },
-  refSide: { flex: 1, borderRadius: 18, borderWidth: 1, padding: 16, justifyContent: 'space-between' },
-  redSide: { backgroundColor: '#8F1D24', borderColor: '#E16A6A' },
-  blueSide: { backgroundColor: '#27429A', borderColor: '#7FA4FF' },
+  refSide: {
+    flex: 1,
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 16,
+    justifyContent: 'space-between',
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  redSide: { borderColor: '#E16A6A' },
+  blueSide: { borderColor: '#7FA4FF' },
+  refHeadRow: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 10, minHeight: 34 },
+  serviceBall: {
+    width: 18,
+    height: 18,
+    borderRadius: 99,
+    backgroundColor: '#D3F95F',
+    borderWidth: 2,
+    borderColor: '#A5CC3F',
+  },
+  refFlash: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(255,255,255,0.55)',
+  },
   refSideTitle: {
     color: '#F8FBFF',
     fontFamily: theme.fonts.title,
