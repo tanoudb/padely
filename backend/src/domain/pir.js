@@ -101,13 +101,21 @@ export function computePillars({
   smashSpeedKmh = 0,
   distanceKm = 0,
   calories = 0,
+  intensityScore = 0,
+  heartRateAvg = 0,
+  oxygenAvg = 0,
   winners = 0,
   directErrors = 0,
   clutchRatio = 0,
   fairPlayScore = 3,
 }) {
   const power = clamp(smashSpeedKmh / 2, 0, 100);
-  const stamina = clamp((distanceKm / 5) * 60 + (calories / 900) * 40, 0, 100);
+  const distanceFactor = clamp((distanceKm / 5) * 45, 0, 45);
+  const calorieFactor = clamp((calories / 900) * 25, 0, 25);
+  const intensityFactor = clamp((intensityScore / 100) * 20, 0, 20);
+  const heartRateFactor = clamp((heartRateAvg / 170) * 7, 0, 7);
+  const oxygenFactor = clamp((oxygenAvg / 100) * 3, 0, 3);
+  const stamina = clamp(distanceFactor + calorieFactor + intensityFactor + heartRateFactor + oxygenFactor, 0, 100);
 
   const totalShots = winners + directErrors;
   const consistency = totalShots === 0

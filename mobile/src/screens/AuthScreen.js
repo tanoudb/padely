@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -44,7 +44,7 @@ function inferLevelFromQuiz(answers) {
 }
 
 export function AuthScreen() {
-  const { login, register } = useSession();
+  const { login, register, verifyEmail, pendingVerification } = useSession();
   const [isRegister, setIsRegister] = useState(false);
   const [email, setEmail] = useState('alice@padely.app');
   const [password, setPassword] = useState('padely2026');
@@ -52,9 +52,16 @@ export function AuthScreen() {
   const [unknownLevel, setUnknownLevel] = useState(false);
   const [level, setLevel] = useState(4);
   const [quizAnswers, setQuizAnswers] = useState({});
+  const [verificationCode, setVerificationCode] = useState('');
   const [error, setError] = useState('');
 
   const quizReady = useMemo(() => QUIZ.every((q) => quizAnswers[q.key]), [quizAnswers]);
+
+  useEffect(() => {
+    if (pendingVerification?.verificationToken) {
+      setVerificationCode(pendingVerification.verificationToken);
+    }
+  }, [pendingVerification?.verificationToken]);
 
   async function submit() {
     setError('');
@@ -65,7 +72,7 @@ export function AuthScreen() {
         }
 
         const finalLevel = unknownLevel ? inferLevelFromQuiz(quizAnswers) : level;
-        await register(
+        const out = await register(
           email.trim(),
           password,
           displayName.trim() || 'Player',
@@ -74,9 +81,21 @@ export function AuthScreen() {
             quizAnswers: unknownLevel ? quizAnswers : null,
           }
         );
+        if (out.requiresEmailVerification) {
+          setError('Email envoye. Valide ton compte avec le code/lien de verification.');
+        }
       } else {
         await login(email.trim(), password);
       }
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  async function submitVerification() {
+    setError('');
+    try {
+      await verifyEmail(verificationCode);
     } catch (e) {
       setError(e.message);
     }
@@ -98,6 +117,29 @@ export function AuthScreen() {
           </View>
 
           <Card style={styles.form} elevated>
+            {pendingVerification ? (
+              <View style={styles.verifyBox}>
+                <Text style={styles.verifyTitle}>Verification email en attente</Text>
+                <Text style={styles.verifyText}>
+                  Compte: {pendingVerification.email}
+                </Text>
+                <TextInput
+                  value={verificationCode}
+                  onChangeText={setVerificationCode}
+                  style={styles.input}
+                  placeholder="Token de verification"
+                  placeholderTextColor={theme.colors.muted}
+                  autoCapitalize="none"
+                />
+                <Pressable style={styles.verifyBtn} onPress={submitVerification}>
+                  <Text style={styles.verifyBtnText}>Valider mon email</Text>
+                </Pressable>
+                {!!pendingVerification.verificationUrl && (
+                  <Text style={styles.hint}>Lien dev: {pendingVerification.verificationUrl}</Text>
+                )}
+              </View>
+            ) : null}
+
             <View style={styles.switch}>
               <Pressable style={[styles.switchBtn, !isRegister && styles.switchBtnActive]} onPress={() => setIsRegister(false)}>
                 <Text style={[styles.switchLabel, !isRegister && styles.switchLabelActive]}>Connexion</Text>
@@ -220,6 +262,39 @@ const styles = StyleSheet.create({
   },
   form: {
     gap: 10,
+  },
+  verifyBox: {
+    borderWidth: 1,
+    borderColor: theme.colors.line,
+    borderRadius: 12,
+    padding: 10,
+    backgroundColor: 'rgba(20, 56, 76, 0.45)',
+    marginBottom: 6,
+    gap: 6,
+  },
+  verifyTitle: {
+    color: theme.colors.accent,
+    fontFamily: theme.fonts.title,
+    fontSize: 13,
+  },
+  verifyText: {
+    color: theme.colors.muted,
+    fontFamily: theme.fonts.body,
+    fontSize: 12,
+  },
+  verifyBtn: {
+    minHeight: 44,
+    borderRadius: 10,
+    backgroundColor: '#2E6F5E',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  verifyBtnText: {
+    color: '#ECFFF9',
+    fontFamily: theme.fonts.title,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    fontSize: 11,
   },
   switch: {
     flexDirection: 'row',

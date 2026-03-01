@@ -9,6 +9,7 @@ export class MemoryStore {
     this.users = new Map();
     this.usersByEmail = new Map();
     this.sessions = new Map();
+    this.emailVerifications = new Map();
     this.matches = new Map();
     this.validations = new Map();
     this.bagItems = new Map();
@@ -17,7 +18,7 @@ export class MemoryStore {
     this.pairRatings = new Map();
   }
 
-  createUser({ email, passwordHash, provider, displayName }) {
+  createUser({ email, passwordHash, provider, displayName, isVerified }) {
     const id = newId('usr');
     const user = {
       id,
@@ -25,7 +26,9 @@ export class MemoryStore {
       passwordHash,
       provider,
       displayName,
+      avatarUrl: null,
       createdAt: nowIso(),
+      isVerified: typeof isVerified === 'boolean' ? isVerified : provider !== 'email',
       athlete: {
         weightKg: null,
         heightCm: null,
@@ -39,6 +42,17 @@ export class MemoryStore {
         completed: false,
         quizAnswers: null,
       },
+      settings: {
+        pointRule: 'punto_de_oro',
+        matchFormat: 'marathon',
+        autoSideSwitch: true,
+      },
+      privacy: {
+        publicProfile: true,
+        showGuestMatches: false,
+        showHealthStats: true,
+      },
+      friends: [],
       calibration: {
         remainingMatches: 5,
       },
@@ -79,6 +93,24 @@ export class MemoryStore {
       userId,
       createdAt: nowIso(),
     });
+  }
+
+  createEmailVerificationToken(userId, token, expiresAt) {
+    this.emailVerifications.set(token, {
+      token,
+      userId,
+      expiresAt,
+      createdAt: nowIso(),
+    });
+  }
+
+  consumeEmailVerificationToken(token) {
+    const current = this.emailVerifications.get(token) ?? null;
+    if (!current) {
+      return null;
+    }
+    this.emailVerifications.delete(token);
+    return current;
   }
 
   getSession(token) {

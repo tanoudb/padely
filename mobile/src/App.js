@@ -6,8 +6,8 @@ import { Backdrop } from './components/Backdrop';
 import { AuthScreen } from './screens/AuthScreen';
 import { HomeScreen } from './screens/HomeScreen';
 import { PlayScreen } from './screens/PlayScreen';
-import { PartnersScreen } from './screens/PartnersScreen';
-import { StatsScreen } from './screens/StatsScreen';
+import { CommunityScreen } from './screens/CommunityScreen';
+import { ProfileScreen } from './screens/ProfileScreen';
 import { SessionProvider, useSession } from './state/session';
 import { theme } from './theme';
 
@@ -29,8 +29,8 @@ function Main() {
       <View style={styles.content}>
         {tab === 'home' && <HomeScreen />}
         {tab === 'play' && <PlayScreen />}
-        {tab === 'partners' && <PartnersScreen />}
-        {tab === 'stats' && <StatsScreen />}
+        {tab === 'crew' && <CommunityScreen />}
+        {tab === 'profile' && <ProfileScreen />}
       </View>
       <TabBar active={tab} onChange={setTab} />
     </SafeAreaView>

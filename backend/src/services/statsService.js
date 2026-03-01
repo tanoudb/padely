@@ -27,6 +27,30 @@ function average(values) {
   return values.reduce((s, v) => s + v, 0) / values.length;
 }
 
+function playerWatch(match, userId) {
+  const map = match.watchByPlayer ?? {};
+  const payload = map[userId] ?? {};
+  return {
+    distanceKm: Number(payload.distanceKm ?? 0) || 0,
+    calories: Number(payload.calories ?? 0) || 0,
+    intensityScore: Number(payload.intensityScore ?? 0) || 0,
+    heartRateAvg: Number(payload.heartRateAvg ?? 0) || 0,
+    oxygenAvg: Number(payload.oxygenAvg ?? 0) || 0,
+  };
+}
+
+function participantsForMatch(match, teamKey) {
+  const fromParticipants = match.participants?.[teamKey];
+  if (Array.isArray(fromParticipants) && fromParticipants.length === 2) {
+    return fromParticipants;
+  }
+
+  return (match[teamKey] ?? []).map((id) => ({
+    kind: 'user',
+    userId: id,
+  }));
+}
+
 function computeRegularityScore(matches) {
   if (matches.length < 2) {
     return 50;
@@ -83,9 +107,12 @@ export async function getDashboard(userId) {
   }).length;
 
   const losses = matches.length - wins;
-  const totalDistanceKm = Number((matches.length * 2.4).toFixed(2));
+  const watches = matches.map((match) => playerWatch(match, userId));
+  const totalDistanceKm = Number(watches.reduce((sum, w) => sum + w.distanceKm, 0).toFixed(2));
   const averageDistanceKm = Number((matches.length ? totalDistanceKm / matches.length : 0).toFixed(2));
-  const calories = Math.round(matches.length * 580);
+  const calories = Math.round(watches.reduce((sum, w) => sum + w.calories, 0));
+  const averageHeartRate = Math.round(average(watches.filter((w) => w.heartRateAvg > 0).map((w) => w.heartRateAvg)));
+  const averageOxygen = Math.round(average(watches.filter((w) => w.oxygenAvg > 0).map((w) => w.oxygenAvg)));
 
   return {
     userId,
@@ -98,6 +125,8 @@ export async function getDashboard(userId) {
     calories,
     totalDistanceKm,
     averageDistanceKm,
+    averageHeartRate,
+    averageOxygen,
     consistencyScore: computeConsistencyScore(matches, userId),
     regularityScore: computeRegularityScore(matches),
     progression: user.history ?? [],
@@ -109,24 +138,30 @@ export async function getDuoStats(userId) {
   const duoMap = new Map();
 
   for (const match of matches) {
-    const userInTeamA = match.teamA.includes(userId);
-    const team = userInTeamA ? match.teamA : match.teamB;
-    const partner = team.find((id) => id !== userId);
+    const teamA = participantsForMatch(match, 'teamA');
+    const teamB = participantsForMatch(match, 'teamB');
+    const userInTeamA = teamA.some((slot) => slot.kind === 'user' && slot.userId === userId);
+    const team = userInTeamA ? teamA : teamB;
+    const partner = team.find((slot) => slot.kind === 'user' && slot.userId !== userId);
+    if (!partner?.userId) {
+      continue;
+    }
+
     const won = (userInTeamA && winnerTeam(match) === 'A') || (!userInTeamA && winnerTeam(match) === 'B');
 
-    if (!duoMap.has(partner)) {
-      duoMap.set(partner, {
-        partnerId: partner,
+    if (!duoMap.has(partner.userId)) {
+      duoMap.set(partner.userId, {
+        partnerId: partner.userId,
         matches: 0,
         wins: 0,
         totalDistanceKm: 0,
       });
     }
 
-    const item = duoMap.get(partner);
+    const item = duoMap.get(partner.userId);
     item.matches += 1;
     item.wins += won ? 1 : 0;
-    item.totalDistanceKm += 2.4;
+    item.totalDistanceKm += playerWatch(match, userId).distanceKm;
   }
 
   return [...duoMap.values()].map((item) => ({

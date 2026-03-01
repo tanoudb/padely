@@ -5,8 +5,8 @@ import { theme } from '../theme';
 const TABS = [
   { key: 'home', label: 'Accueil' },
   { key: 'play', label: 'Match' },
-  { key: 'partners', label: 'Partenaires' },
-  { key: 'stats', label: 'Stats' },
+  { key: 'crew', label: 'Crew' },
+  { key: 'profile', label: 'Profil' },
 ];
 
 export function TabBar({ active, onChange }) {

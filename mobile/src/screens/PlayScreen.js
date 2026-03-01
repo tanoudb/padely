@@ -30,13 +30,56 @@ import {
   undoPoint,
 } from '../utils/scoring';
 
+function scoreConfigFromPreferences(settings = {}) {
+  const pointRule = settings.pointRule ?? 'punto_de_oro';
+  const matchFormat = settings.matchFormat ?? 'marathon';
+  const puntoDeOro = pointRule !== 'avantage';
+
+  if (matchFormat === 'standard') {
+    return {
+      puntoDeOro,
+      setsToWin: 2,
+      tieBreakPoints: 7,
+      noTieBreakInDecidingSet: false,
+      decidingSetMode: 'full_set',
+      superTieBreakPoints: 10,
+    };
+  }
+
+  if (matchFormat === 'club') {
+    return {
+      puntoDeOro,
+      setsToWin: 2,
+      tieBreakPoints: 7,
+      noTieBreakInDecidingSet: false,
+      decidingSetMode: 'super_tiebreak',
+      superTieBreakPoints: 10,
+    };
+  }
+
+  return {
+    puntoDeOro,
+    setsToWin: 3,
+    tieBreakPoints: 7,
+    noTieBreakInDecidingSet: true,
+    decidingSetMode: 'full_set',
+    superTieBreakPoints: 10,
+  };
+}
+
+function matchFormatLabel(format) {
+  if (format === 'standard') return 'Standard · 2 sets gagnants';
+  if (format === 'club') return 'Club · 3e set en super tie-break';
+  return 'Marathon · 3 sets gagnants';
+}
+
 function MatchCard({ match, onValidate }) {
   const label = match.sets.map((set) => `${set.a}-${set.b}`).join(' / ');
   return (
     <View style={styles.matchCard}>
       <Text style={styles.matchTitle}>Match {match.id.slice(-6)}</Text>
       <Text style={styles.meta}>Score: {label || 'N/A'}</Text>
-      <Text style={styles.meta}>Statut: {match.status}</Text>
+      <Text style={styles.meta}>Statut: {match.status} · {match.mode === 'friendly' ? 'Amical' : 'Classe'}</Text>
       {match.canValidate ? (
         <View style={styles.row}>
           <Pressable style={[styles.actionBtn, styles.accept]} onPress={() => onValidate(match.id, true)}>
@@ -103,18 +146,16 @@ function victoryTone(sets, winner) {
 export function PlayScreen() {
   const { token, user } = useSession();
   const [players, setPlayers] = useState([]);
-  const [selected, setSelected] = useState([]);
+  const [selectedUsers, setSelectedUsers] = useState([]);
+  const [guests, setGuests] = useState([]);
+  const [guestName, setGuestName] = useState('');
+  const [guestLevel, setGuestLevel] = useState('Intermediaire');
+  const [matchMode, setMatchMode] = useState('ranked');
   const [totalCost, setTotalCost] = useState('48');
   const [feedback, setFeedback] = useState('');
   const [matches, setMatches] = useState([]);
-  const [score, setScore] = useState(
-    createScoreState({
-      puntoDeOro: false,
-      setsToWin: 3,
-      noTieBreakInDecidingSet: true,
-    })
-  );
-  const [autoSideSwitch, setAutoSideSwitch] = useState(true);
+  const [score, setScore] = useState(createScoreState(scoreConfigFromPreferences(user.settings)));
+  const [autoSideSwitch, setAutoSideSwitch] = useState(Boolean(user.settings?.autoSideSwitch ?? true));
   const [fullScreenMode, setFullScreenMode] = useState(false);
   const [forceLandscapeLayout, setForceLandscapeLayout] = useState(true);
   const [modalOrientation, setModalOrientation] = useState('unknown');
@@ -129,6 +170,16 @@ export function PlayScreen() {
     () => players.filter((p) => p.id !== user.id),
     [players, user.id]
   );
+
+  const selectedSlots = useMemo(() => ([
+    ...selectedUsers,
+    ...guests.map((g) => ({
+      kind: 'guest',
+      guestId: g.id,
+      guestName: g.name,
+      guestLevel: g.level,
+    })),
+  ]), [selectedUsers, guests]);
 
   const displayPoints = getDisplayPoints(score);
   const currentServer = getCurrentServer(score);
@@ -157,6 +208,12 @@ export function PlayScreen() {
   }, []);
 
   useEffect(() => {
+    const cfg = scoreConfigFromPreferences(user.settings);
+    setScore(resetScore(cfg));
+    setAutoSideSwitch(Boolean(user.settings?.autoSideSwitch ?? true));
+  }, [user.settings]);
+
+  useEffect(() => {
     if (!score.winner) {
       cinematicAnim.setValue(0);
       return;
@@ -183,26 +240,43 @@ export function PlayScreen() {
       if (!score.winner || savingAuto || savedMatchId) {
         return;
       }
-      if (selected.length !== 3) {
-        setFeedback('Match termine: selectionne les 3 joueurs pour enregistrer automatiquement.');
+      if (selectedSlots.length !== 3) {
+        setFeedback('Match termine: ajoute 3 joueurs (inscrits ou invites) pour enregistrer automatiquement.');
         return;
       }
 
       try {
         setSavingAuto(true);
-        const [teamA2, teamB1, teamB2] = selected;
+        const [teamA2, teamB1, teamB2] = selectedSlots;
         const out = await api.createMatch(token, {
           teamA: [user.id, teamA2],
           teamB: [teamB1, teamB2],
           sets: setsPayload,
+          mode: matchMode,
           goldenPoints: { teamA: 0, teamB: 0 },
           validationMode: 'rapide',
           totalCostEur: Number(totalCost),
           clubName: 'Club local',
+          watchByPlayer: {
+            [user.id]: {
+              distanceKm: 0,
+              calories: 0,
+              intensityScore: 0,
+              heartRateAvg: 0,
+              oxygenAvg: 0,
+            },
+          },
         });
 
+        let inviteSuffix = '';
+        try {
+          const invite = await api.createMatchInvite(token, out.id);
+          inviteSuffix = invite?.url ? ' Lien invitation genere.' : '';
+        } catch {
+          inviteSuffix = '';
+        }
         setSavedMatchId(out.id);
-        setFeedback(`Match ${out.id.slice(-6)} enregistre automatiquement.`);
+        setFeedback(`Match ${out.id.slice(-6)} enregistre automatiquement.${inviteSuffix}`);
         await refresh();
       } catch (e) {
         setFeedback(`Erreur enregistrement auto: ${e.message}`);
@@ -212,43 +286,84 @@ export function PlayScreen() {
     }
 
     autoSave();
-  }, [score.winner, selected, setsPayload, totalCost, token, user.id, savingAuto, savedMatchId]);
+  }, [score.winner, selectedSlots, setsPayload, totalCost, token, user.id, savingAuto, savedMatchId, matchMode]);
 
-  function toggle(playerId) {
-    setSelected((prev) => {
+  function toggleUser(playerId) {
+    setSelectedUsers((prev) => {
       if (prev.includes(playerId)) {
         return prev.filter((id) => id !== playerId);
       }
-      if (prev.length >= 3) {
+      if (prev.length + guests.length >= 3) {
         return prev;
       }
       return [...prev, playerId];
     });
   }
 
+  function removeGuest(guestId) {
+    setGuests((prev) => prev.filter((g) => g.id !== guestId));
+  }
+
+  function addGuest() {
+    const name = guestName.trim();
+    if (!name) {
+      setFeedback('Entre un nom d invite.');
+      return;
+    }
+    if (selectedUsers.length + guests.length >= 3) {
+      setFeedback('Tu as deja 3 joueurs selectionnes.');
+      return;
+    }
+
+    setGuests((prev) => ([...prev, {
+      id: `guest_${Date.now()}_${Math.round(Math.random() * 9999)}`,
+      name,
+      level: guestLevel,
+    }]));
+    setGuestName('');
+    setFeedback('Invite ajoute.');
+  }
+
   async function createManual() {
     setFeedback('');
     try {
-      if (selected.length !== 3) {
-        throw new Error('Selectionne exactement 3 joueurs');
+      if (selectedSlots.length !== 3) {
+        throw new Error('Selectionne 3 joueurs (inscrits ou invites)');
       }
 
       if (setsPayload.length === 0) {
         throw new Error('Ajoute au moins un jeu avant d enregistrer le match');
       }
 
-      const [teamA2, teamB1, teamB2] = selected;
+      const [teamA2, teamB1, teamB2] = selectedSlots;
       const out = await api.createMatch(token, {
         teamA: [user.id, teamA2],
         teamB: [teamB1, teamB2],
         sets: setsPayload,
+        mode: matchMode,
         goldenPoints: { teamA: 0, teamB: 0 },
         validationMode: 'rapide',
         totalCostEur: Number(totalCost),
         clubName: 'Club local',
+        watchByPlayer: {
+          [user.id]: {
+            distanceKm: 0,
+            calories: 0,
+            intensityScore: 0,
+            heartRateAvg: 0,
+            oxygenAvg: 0,
+          },
+        },
       });
 
-      setFeedback(`Match ${out.id.slice(-6)} cree.`);
+      let inviteSuffix = '';
+      try {
+        const invite = await api.createMatchInvite(token, out.id);
+        inviteSuffix = invite?.url ? ' Lien invitation genere.' : '';
+      } catch {
+        inviteSuffix = '';
+      }
+      setFeedback(`Match ${out.id.slice(-6)} cree.${inviteSuffix}`);
       setSavedMatchId(out.id);
       await refresh();
     } catch (e) {
@@ -299,26 +414,76 @@ export function PlayScreen() {
         </View>
 
         <Card elevated>
-          <Text style={styles.sectionTitle}>1) Choisis 3 joueurs</Text>
-          <Text style={styles.meta}>Le premier complete ton equipe. Les deux autres sont l equipe bleue.</Text>
+          <Text style={styles.sectionTitle}>1) Joueurs (inscrits + invites)</Text>
+          <Text style={styles.meta}>Ordre: 1er selectionne = ton partenaire rouge, puis equipe bleue.</Text>
           <View style={styles.wrap}>
             {selectablePlayers.map((p) => {
-              const active = selected.includes(p.id);
+              const active = selectedUsers.includes(p.id);
               return (
                 <Pressable
                   key={p.id}
                   style={[styles.playerChip, active && styles.playerChipActive]}
-                  onPress={() => toggle(p.id)}
+                  onPress={() => toggleUser(p.id)}
                 >
                   <Text style={[styles.playerText, active && styles.playerTextActive]}>{p.displayName} ({p.rating})</Text>
                 </Pressable>
               );
             })}
           </View>
-          <Text style={styles.meta}>Selection: {selected.length}/3</Text>
+
+          <View style={styles.rowWrap}>
+            <TextInput
+              style={[styles.input, styles.guestInput]}
+              placeholder="Nom invite"
+              placeholderTextColor={theme.colors.muted}
+              value={guestName}
+              onChangeText={setGuestName}
+            />
+            <View style={styles.guestLevels}>
+              {['Debutant', 'Intermediaire', 'Confirme'].map((lvl) => (
+                <Pressable
+                  key={lvl}
+                  style={[styles.levelChip, guestLevel === lvl && styles.levelChipActive]}
+                  onPress={() => setGuestLevel(lvl)}
+                >
+                  <Text style={[styles.levelChipText, guestLevel === lvl && styles.levelChipTextActive]}>{lvl}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <Pressable style={styles.addGuestBtn} onPress={addGuest}>
+              <Text style={styles.addGuestText}>Ajouter invite</Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.wrap}>
+            {guests.map((g) => (
+              <Pressable key={g.id} style={styles.guestBadge} onPress={() => removeGuest(g.id)}>
+                <Text style={styles.guestBadgeText}>{g.name} ({g.level}) ✕</Text>
+              </Pressable>
+            ))}
+          </View>
+          <Text style={styles.meta}>Selection totale: {selectedSlots.length}/3</Text>
         </Card>
 
         <Card>
+          <View style={styles.optionRow}>
+            <Text style={styles.optionLabel}>Mode de match</Text>
+            <View style={styles.row}>
+              <Pressable
+                style={[styles.serverBtn, matchMode === 'ranked' && styles.serverBtnActive]}
+                onPress={() => setMatchMode('ranked')}
+              >
+                <Text style={[styles.serverBtnText, matchMode === 'ranked' && styles.serverBtnTextActive]}>Classe</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.serverBtn, matchMode === 'friendly' && styles.serverBtnActive]}
+                onPress={() => setMatchMode('friendly')}
+              >
+                <Text style={[styles.serverBtnText, matchMode === 'friendly' && styles.serverBtnTextActive]}>Amical</Text>
+              </Pressable>
+            </View>
+          </View>
+
           <View style={styles.optionRow}>
             <Text style={styles.optionLabel}>Punto de Oro</Text>
             <Switch
@@ -328,8 +493,9 @@ export function PlayScreen() {
               thumbColor={score.config.puntoDeOro ? '#F4D35E' : '#DFEAF1'}
             />
           </View>
+
           <View style={styles.optionRow}>
-            <Text style={styles.optionLabel}>Changement de cote auto (jeux impairs)</Text>
+            <Text style={styles.optionLabel}>Changement de cote auto</Text>
             <Switch
               value={autoSideSwitch}
               onValueChange={setAutoSideSwitch}
@@ -337,10 +503,9 @@ export function PlayScreen() {
               thumbColor={autoSideSwitch ? '#00D1B2' : '#DFEAF1'}
             />
           </View>
-          <Text style={styles.meta}>Punto de Oro: a 40-40, le point suivant gagne le jeu.</Text>
-          <Text style={styles.meta}>
-            Format long: 3 sets gagnants. Set a 6 jeux, 2 d ecart. Tie-break a 6-6 sauf set decisif.
-          </Text>
+
+          <Text style={styles.meta}>Regle 40-40: {score.config.puntoDeOro ? 'Punto de Oro' : 'Avantage'}.</Text>
+          <Text style={styles.meta}>Format auto: {matchFormatLabel(user.settings?.matchFormat)}.</Text>
 
           <View style={styles.optionRow}>
             <Text style={styles.optionLabel}>Serveur initial</Text>
@@ -422,10 +587,10 @@ export function PlayScreen() {
           </View>
 
           <View style={[styles.refInfoRow, !refereeLandscape && styles.refInfoRowPortrait]}>
-            <Text style={styles.refInfoText}>{displayPoints.tieBreak ? 'Tie-break actif (7 pts, 2 d ecart)' : 'Jeu standard (15-30-40-AV)'}</Text>
+            <Text style={styles.refInfoText}>{displayPoints.tieBreak ? 'Tie-break actif' : 'Jeu standard (15-30-40)'}</Text>
             <Text style={styles.refInfoText}>Sets: {score.sets.map((set) => `${set.a}-${set.b}`).join(' / ') || 'aucun'}</Text>
             <Text style={styles.refInfoText}>
-              Service: {currentServer === 'a' ? 'Rouge' : 'Bleue'} · Sets gagnes {setsWonA}-{setsWonB} (objectif 3)
+              Service: {currentServer === 'a' ? 'Rouge' : 'Bleue'} · Sets gagnes {setsWonA}-{setsWonB} (objectif {score.config.setsToWin})
             </Text>
           </View>
 
@@ -502,6 +667,7 @@ const styles = StyleSheet.create({
   label: { color: theme.colors.muted, marginBottom: 4, marginTop: 4, fontFamily: theme.fonts.body },
   meta: { color: theme.colors.muted, marginBottom: 6, fontFamily: theme.fonts.body },
   wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
+  rowWrap: { gap: 8, marginBottom: 8 },
   playerChip: {
     paddingVertical: 10,
     paddingHorizontal: 12,
@@ -513,6 +679,36 @@ const styles = StyleSheet.create({
   playerChipActive: { backgroundColor: theme.colors.accent, borderColor: theme.colors.accent },
   playerText: { color: theme.colors.text, fontFamily: theme.fonts.title, fontSize: 12 },
   playerTextActive: { color: '#3A2500' },
+  guestInput: { minHeight: 44 },
+  guestLevels: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  levelChip: {
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#476782',
+    backgroundColor: '#173245',
+    paddingHorizontal: 8,
+    paddingVertical: 7,
+  },
+  levelChipActive: { backgroundColor: theme.colors.accent, borderColor: theme.colors.accent },
+  levelChipText: { color: '#D5EAF8', fontFamily: theme.fonts.title, fontSize: 10, textTransform: 'uppercase' },
+  levelChipTextActive: { color: '#3A2500' },
+  addGuestBtn: {
+    minHeight: 42,
+    borderRadius: 10,
+    backgroundColor: '#2E6F5E',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  addGuestText: { color: '#ECFFF9', fontFamily: theme.fonts.title, textTransform: 'uppercase', fontSize: 11 },
+  guestBadge: {
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#6B8BA1',
+    backgroundColor: '#254A60',
+  },
+  guestBadgeText: { color: '#E7F5FF', fontFamily: theme.fonts.body, fontSize: 11 },
   optionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
   optionLabel: { color: theme.colors.text, fontFamily: theme.fonts.title, fontSize: 14 },
   serverBtn: {

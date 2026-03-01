@@ -12,9 +12,24 @@ function opposite(side) {
   return side === 'a' ? 'b' : 'a';
 }
 
+function getDecidingSetIndex(config) {
+  return (config.setsToWin * 2) - 2;
+}
+
+function isDecidingSetIndex(setIndex, config) {
+  return setIndex === getDecidingSetIndex(config);
+}
+
+function isSuperTieBreakSet(setIndex, config) {
+  return config.decidingSetMode === 'super_tiebreak' && isDecidingSetIndex(setIndex, config);
+}
+
 function shouldUseTieBreak(setIndex, config) {
-  const decidingSetIndex = (config.setsToWin * 2) - 2;
-  if (config.noTieBreakInDecidingSet && setIndex === decidingSetIndex) {
+  if (isSuperTieBreakSet(setIndex, config)) {
+    return false;
+  }
+
+  if (config.noTieBreakInDecidingSet && isDecidingSetIndex(setIndex, config)) {
     return false;
   }
   return true;
@@ -25,8 +40,10 @@ export function createScoreState(config = {}) {
     config: {
       puntoDeOro: Boolean(config.puntoDeOro),
       tieBreakPoints: config.tieBreakPoints ?? 7,
+      superTieBreakPoints: config.superTieBreakPoints ?? 10,
       setsToWin: config.setsToWin ?? 3,
       noTieBreakInDecidingSet: config.noTieBreakInDecidingSet ?? true,
+      decidingSetMode: config.decidingSetMode ?? 'full_set',
     },
     sets: [],
     currentSet: { a: 0, b: 0 },
@@ -36,6 +53,7 @@ export function createScoreState(config = {}) {
       a: 0,
       b: 0,
       firstServer: 'a',
+      target: config.tieBreakPoints ?? 7,
     },
     server: 'a',
     winner: null,
@@ -66,10 +84,23 @@ function evaluateMatchEnd(state) {
 }
 
 function startNextSet(state) {
+  const setIndex = state.sets.length;
+  const superTieBreak = isSuperTieBreakSet(setIndex, state.config);
+
   state.currentSet = { a: 0, b: 0 };
   state.points = { a: 0, b: 0 };
-  state.tieBreak = { active: false, a: 0, b: 0, firstServer: state.server };
+  state.tieBreak = {
+    active: superTieBreak,
+    a: 0,
+    b: 0,
+    firstServer: state.server,
+    target: superTieBreak ? state.config.superTieBreakPoints : state.config.tieBreakPoints,
+  };
   state.sideChangeAlert = false;
+
+  if (superTieBreak) {
+    state.lastEvent = 'Super tie-break (10 pts)';
+  }
 }
 
 function finalizeSet(state) {
@@ -103,6 +134,7 @@ function maybeSetEnd(state) {
       state.tieBreak.a = 0;
       state.tieBreak.b = 0;
       state.tieBreak.firstServer = state.server;
+      state.tieBreak.target = state.config.tieBreakPoints;
       state.lastEvent = 'Tie-break';
       return;
     }
@@ -149,15 +181,28 @@ function winTieBreakPoint(state, side) {
   const ta = state.tieBreak.a;
   const tb = state.tieBreak.b;
   const diff = Math.abs(ta - tb);
+  const target = state.tieBreak.target ?? state.config.tieBreakPoints;
 
-  if ((ta >= state.config.tieBreakPoints || tb >= state.config.tieBreakPoints) && diff >= 2) {
-    if (side === 'a') {
+  if ((ta >= target || tb >= target) && diff >= 2) {
+    const setIndex = state.sets.length;
+    const superTieBreak = isSuperTieBreakSet(setIndex, state.config)
+      && state.currentSet.a === 0
+      && state.currentSet.b === 0;
+
+    if (superTieBreak) {
+      if (side === 'a') {
+        state.currentSet.a = 1;
+        state.currentSet.b = 0;
+      } else {
+        state.currentSet.a = 0;
+        state.currentSet.b = 1;
+      }
+    } else if (side === 'a') {
       state.currentSet.a += 1;
     } else {
       state.currentSet.b += 1;
     }
 
-    // After tie-break set, next set starts with opposite server of tie-break opener.
     state.server = opposite(state.tieBreak.firstServer);
     finalizeSet(state);
   }

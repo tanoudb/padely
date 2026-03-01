@@ -50,9 +50,15 @@ export async function seedDemoData() {
       city: player.city,
       location: player.location,
       pir: 55,
+      isVerified: true,
       athlete: {
         ...user.athlete,
         level: 4,
+      },
+      settings: {
+        pointRule: 'punto_de_oro',
+        matchFormat: 'standard',
+        autoSideSwitch: true,
       },
       onboarding: {
         completed: true,

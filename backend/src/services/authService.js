@@ -10,6 +10,133 @@ function sanitizeUser(user) {
   return rest;
 }
 
+function parseJwtPayload(token) {
+  try {
+    const parts = String(token).split('.');
+    if (parts.length < 2) {
+      return null;
+    }
+    const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const json = Buffer.from(b64, 'base64').toString('utf8');
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}
+
+function oauthFallbackPayload(provider, idToken, email, displayName) {
+  const payload = parseJwtPayload(idToken) ?? {};
+  const safeEmail = email
+    ?? payload.email
+    ?? `${provider}_${String(idToken).slice(0, 10)}@padely.local`;
+
+  return {
+    email: safeEmail,
+    displayName: displayName ?? payload.name ?? `${provider}-player`,
+  };
+}
+
+async function verifyGoogleIdToken({ idToken }) {
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  if (!clientId) {
+    throw new Error('GOOGLE_CLIENT_ID is missing');
+  }
+
+  const { OAuth2Client } = await import('google-auth-library');
+  const client = new OAuth2Client(clientId);
+  const ticket = await client.verifyIdToken({
+    idToken,
+    audience: clientId,
+  });
+  const payload = ticket.getPayload();
+  if (!payload?.email) {
+    throw new Error('Google token missing email');
+  }
+
+  return {
+    email: payload.email,
+    displayName: payload.name ?? payload.given_name ?? 'google-player',
+  };
+}
+
+async function verifyAppleIdToken({ idToken }) {
+  const bundleId = process.env.APPLE_BUNDLE_ID;
+  const serviceId = process.env.APPLE_SERVICE_ID;
+  const audience = bundleId ?? serviceId;
+  if (!audience) {
+    throw new Error('APPLE_BUNDLE_ID or APPLE_SERVICE_ID is required');
+  }
+
+  const appleSigninAuth = await import('apple-signin-auth');
+  const claims = await appleSigninAuth.verifyIdToken(idToken, {
+    audience,
+    ignoreExpiration: false,
+  });
+  if (!claims?.email && !claims?.sub) {
+    throw new Error('Apple token missing subject');
+  }
+
+  return {
+    email: claims.email ?? `apple_${claims.sub}@privaterelay.appleid.local`,
+    displayName: claims.email ? claims.email.split('@')[0] : 'apple-player',
+  };
+}
+
+async function verifyOAuthIdentity({ provider, idToken, email, displayName }) {
+  const allowInsecureDev = process.env.ALLOW_INSECURE_OAUTH_DEV === 'true';
+  try {
+    if (provider === 'google') {
+      return await verifyGoogleIdToken({ idToken });
+    }
+    return await verifyAppleIdToken({ idToken });
+  } catch (error) {
+    if (!allowInsecureDev) {
+      throw new Error(`${provider} token verification failed: ${error.message}`);
+    }
+    return oauthFallbackPayload(provider, idToken, email, displayName);
+  }
+}
+
+async function sendEmailVerificationLink({ email, token }) {
+  const verifyBaseUrl = process.env.VERIFY_BASE_URL ?? 'http://127.0.0.1:8787/api/v1/auth/verify';
+  const verificationUrl = `${verifyBaseUrl}?token=${encodeURIComponent(token)}`;
+  const from = process.env.EMAIL_FROM ?? 'no-reply@padely.app';
+  const smtpHost = process.env.SMTP_HOST;
+  const smtpPort = process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : 587;
+  const smtpUser = process.env.SMTP_USER;
+  const smtpPass = process.env.SMTP_PASS;
+
+  if (!smtpHost || !smtpUser || !smtpPass) {
+    return {
+      sent: false,
+      verificationUrl,
+    };
+  }
+
+  const nodemailer = await import('nodemailer');
+  const transporter = nodemailer.createTransport({
+    host: smtpHost,
+    port: smtpPort,
+    secure: smtpPort === 465,
+    auth: {
+      user: smtpUser,
+      pass: smtpPass,
+    },
+  });
+
+  await transporter.sendMail({
+    from,
+    to: email,
+    subject: 'Padely - verification email',
+    text: `Validez votre email: ${verificationUrl}`,
+  });
+
+  return {
+    sent: true,
+    verificationUrl,
+  };
+}
+
 export async function registerWithEmail({ email, password, displayName }) {
   if (!email || !password || password.length < 8) {
     throw new Error('Invalid registration payload');
@@ -24,17 +151,34 @@ export async function registerWithEmail({ email, password, displayName }) {
     passwordHash: hashPassword(password),
     provider: 'email',
     displayName: displayName ?? email.split('@')[0],
+    isVerified: false,
   });
 
-  const token = newToken();
-  await store.createSession(user.id, token);
-  return { token, user: sanitizeUser(user) };
+  const verificationToken = newToken();
+  const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24).toISOString();
+  await store.createEmailVerificationToken(user.id, verificationToken, expiresAt);
+
+  const mail = await sendEmailVerificationLink({
+    email: user.email,
+    token: verificationToken,
+  });
+
+  return {
+    requiresEmailVerification: true,
+    verificationSent: mail.sent,
+    verificationUrl: process.env.NODE_ENV === 'production' ? undefined : mail.verificationUrl,
+    verificationToken: process.env.NODE_ENV === 'production' ? undefined : verificationToken,
+    user: sanitizeUser(user),
+  };
 }
 
 export async function loginWithEmail({ email, password }) {
   const user = await store.getUserByEmail(email ?? '');
   if (!user || !user.passwordHash || !verifyPassword(password ?? '', user.passwordHash)) {
     throw new Error('Invalid credentials');
+  }
+  if (!user.isVerified) {
+    throw new Error('Email not verified');
   }
 
   const token = newToken();
@@ -52,21 +196,59 @@ export async function loginWithProvider({ provider, idToken, email, displayName 
     throw new Error('Invalid OAuth token');
   }
 
-  const safeEmail = email ?? `${provider}_${idToken.slice(0, 8)}@padely.local`;
+  const identity = await verifyOAuthIdentity({
+    provider,
+    idToken,
+    email,
+    displayName,
+  });
+  const safeEmail = identity.email;
   let user = await store.getUserByEmail(safeEmail);
 
   if (!user) {
     user = await store.createUser({
       email: safeEmail,
       provider,
-      displayName: displayName ?? `${provider}-player`,
+      displayName: identity.displayName ?? `${provider}-player`,
       passwordHash: null,
+      isVerified: true,
     });
   }
 
   const token = newToken();
   await store.createSession(user.id, token);
   return { token, user: sanitizeUser(user) };
+}
+
+export async function verifyEmailToken(token) {
+  if (!token || token.length < 10) {
+    throw new Error('Invalid verification token');
+  }
+
+  const item = await store.consumeEmailVerificationToken(token);
+  if (!item) {
+    throw new Error('Verification token not found');
+  }
+  if (new Date(item.expiresAt).getTime() < Date.now()) {
+    throw new Error('Verification token expired');
+  }
+
+  const user = await store.getUserById(item.userId);
+  if (!user) {
+    throw new Error('User not found');
+  }
+
+  const updated = await store.updateUser(user.id, {
+    isVerified: true,
+  });
+  const sessionToken = newToken();
+  await store.createSession(updated.id, sessionToken);
+
+  return {
+    token: sessionToken,
+    user: sanitizeUser(updated),
+    verified: true,
+  };
 }
 
 export async function requireUser(token) {

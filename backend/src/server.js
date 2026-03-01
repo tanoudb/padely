@@ -8,11 +8,17 @@ import {
   loginWithEmail,
   loginWithProvider,
   registerWithEmail,
+  verifyEmailToken,
 } from './services/authService.js';
-import { addRacket, getBag } from './services/bagService.js';
 import {
+  addFriend,
+  getCrewOverview,
   getBalancedProposals,
   getCityLeaderboard,
+  listChannelMessages,
+  listPrivateMessages,
+  postChannelMessage,
+  postPrivateMessage,
   refreshCityLeaderboard,
   searchPlayers,
 } from './services/communityService.js';
@@ -24,6 +30,7 @@ import {
 import { createListing, listListings } from './services/marketplaceService.js';
 import {
   createMatch,
+  createPostMatchInvite,
   getMatch,
   listMatchesForUser,
   validateMatch,
@@ -32,6 +39,7 @@ import {
   completeOnboarding,
   getProfile,
   updateAthleteProfile,
+  updateUserSettings,
 } from './services/profileService.js';
 import {
   getDashboard,
@@ -87,6 +95,16 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, await loginWithProvider({ ...payload, provider: 'apple' }));
     }
 
+    if (req.method === 'GET' && url.pathname === '/api/v1/auth/verify') {
+      const token = url.searchParams.get('token');
+      return json(res, 200, await verifyEmailToken(token));
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/v1/auth/verify') {
+      const payload = await readJson(req);
+      return json(res, 200, await verifyEmailToken(payload.token));
+    }
+
     if (req.method === 'GET' && url.pathname === '/api/v1/me') {
       const me = await requireAuth(req);
       return json(res, 200, me);
@@ -109,15 +127,10 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, await completeOnboarding(me.id, payload));
     }
 
-    if (req.method === 'POST' && url.pathname === '/api/v1/bag/items') {
+    if (req.method === 'PUT' && url.pathname === '/api/v1/profile/settings') {
       const me = await requireAuth(req);
       const payload = await readJson(req);
-      return json(res, 201, await addRacket(me.id, payload));
-    }
-
-    if (req.method === 'GET' && url.pathname === '/api/v1/bag/items') {
-      const me = await requireAuth(req);
-      return json(res, 200, await getBag(me.id));
+      return json(res, 200, await updateUserSettings(me.id, payload));
     }
 
     if (req.method === 'POST' && url.pathname === '/api/v1/matches') {
@@ -155,6 +168,14 @@ const server = http.createServer(async (req, res) => {
     }
 
     {
+      const params = pathMatch(url.pathname, '/api/v1/matches/:matchId/invite');
+      if (req.method === 'POST' && params) {
+        const me = await requireAuth(req);
+        return json(res, 200, await createPostMatchInvite(params.matchId, me.id));
+      }
+    }
+
+    {
       const params = pathMatch(url.pathname, '/api/v1/stats/dashboard/:userId');
       if (req.method === 'GET' && params) {
         await requireAuth(req);
@@ -187,6 +208,52 @@ const server = http.createServer(async (req, res) => {
         lng: maybeNumber(url.searchParams.get('lng')),
         radiusKm: Number(url.searchParams.get('radiusKm') ?? 25),
       }));
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/v1/community/crew') {
+      const me = await requireAuth(req);
+      const city = url.searchParams.get('city') ?? undefined;
+      return json(res, 200, await getCrewOverview(me.id, city));
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/v1/community/friends') {
+      const me = await requireAuth(req);
+      const payload = await readJson(req);
+      return json(res, 200, await addFriend(me.id, payload.friendId));
+    }
+
+    {
+      const params = pathMatch(url.pathname, '/api/v1/community/messages/:friendId');
+      if (req.method === 'GET' && params) {
+        const me = await requireAuth(req);
+        return json(res, 200, await listPrivateMessages(me.id, decodeURIComponent(params.friendId)));
+      }
+      if (req.method === 'POST' && params) {
+        const me = await requireAuth(req);
+        const payload = await readJson(req);
+        return json(res, 201, await postPrivateMessage({
+          fromUserId: me.id,
+          toUserId: decodeURIComponent(params.friendId),
+          text: payload.text,
+        }));
+      }
+    }
+
+    {
+      const params = pathMatch(url.pathname, '/api/v1/community/channels/:channel/messages');
+      if (req.method === 'GET' && params) {
+        await requireAuth(req);
+        return json(res, 200, await listChannelMessages(decodeURIComponent(params.channel)));
+      }
+      if (req.method === 'POST' && params) {
+        const me = await requireAuth(req);
+        const payload = await readJson(req);
+        return json(res, 201, await postChannelMessage({
+          userId: me.id,
+          channel: decodeURIComponent(params.channel),
+          text: payload.text,
+        }));
+      }
     }
 
     if (req.method === 'GET' && url.pathname === '/api/v1/community/leaderboard') {

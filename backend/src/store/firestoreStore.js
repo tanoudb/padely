@@ -39,6 +39,7 @@ export class FirestoreStore {
 
   users() { return this.db.collection('users'); }
   sessions() { return this.db.collection('sessions'); }
+  emailVerifications() { return this.db.collection('emailVerifications'); }
   matches() { return this.db.collection('matches'); }
   validations() { return this.db.collection('validations'); }
   bagItems() { return this.db.collection('bagItems'); }
@@ -46,7 +47,7 @@ export class FirestoreStore {
   pairRatings() { return this.db.collection('pairRatings'); }
   leaderboards() { return this.db.collection('leaderboards'); }
 
-  async createUser({ email, passwordHash, provider, displayName }) {
+  async createUser({ email, passwordHash, provider, displayName, isVerified }) {
     await this.ensureReady();
     const id = newId('usr');
     const user = {
@@ -56,7 +57,9 @@ export class FirestoreStore {
       passwordHash,
       provider,
       displayName,
+      avatarUrl: null,
       createdAt: nowIso(),
+      isVerified: typeof isVerified === 'boolean' ? isVerified : provider !== 'email',
       athlete: {
         weightKg: null,
         heightCm: null,
@@ -70,6 +73,17 @@ export class FirestoreStore {
         completed: false,
         quizAnswers: null,
       },
+      settings: {
+        pointRule: 'punto_de_oro',
+        matchFormat: 'marathon',
+        autoSideSwitch: true,
+      },
+      privacy: {
+        publicProfile: true,
+        showGuestMatches: false,
+        showHealthStats: true,
+      },
+      friends: [],
       calibration: {
         remainingMatches: 5,
       },
@@ -116,6 +130,28 @@ export class FirestoreStore {
       userId,
       createdAt: nowIso(),
     });
+  }
+
+  async createEmailVerificationToken(userId, token, expiresAt) {
+    await this.ensureReady();
+    await this.emailVerifications().doc(token).set({
+      token,
+      userId,
+      expiresAt,
+      createdAt: nowIso(),
+    });
+  }
+
+  async consumeEmailVerificationToken(token) {
+    await this.ensureReady();
+    const ref = this.emailVerifications().doc(token);
+    const doc = await ref.get();
+    if (!doc.exists) {
+      return null;
+    }
+    const data = doc.data();
+    await ref.delete();
+    return data;
   }
 
   async getSession(token) {
