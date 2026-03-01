@@ -1,62 +1,47 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import {
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
-import { Card } from '../components/Card';
+import React, { useEffect, useState } from 'react';
+import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import Animated, {
+  Easing,
+  interpolate,
+  useAnimatedStyle,
+  useSharedValue,
+  withDelay,
+  withSequence,
+  withTiming,
+} from 'react-native-reanimated';
+import { firstFieldError, fieldErrorsFromApiError } from '../utils/formErrors';
 import { useI18n } from '../state/i18n';
-import { Backdrop } from '../components/Backdrop';
 import { useSession } from '../state/session';
+import { useUi } from '../state/ui';
 import { theme } from '../theme';
-
-const QUIZ = [
-  { key: 'vitres', i18n: 'auth.quizVitres' },
-  { key: 'filet', i18n: 'auth.quizFilet' },
-  { key: 'tournoi', i18n: 'auth.quizTournoi' },
-  { key: 'technique', i18n: 'auth.quizTechnique' },
-];
-
-function inferLevelFromQuiz(answers) {
-  const values = Object.values(answers).map((v) => Number(v));
-  if (!values.length) {
-    return 4;
-  }
-
-  const avg = values.reduce((s, v) => s + v, 0) / values.length;
-  const mapped = Math.round(1 + ((avg - 1) * 7) / 4);
-  return Math.max(1, Math.min(8, mapped));
-}
 
 export function AuthScreen() {
   const { login, register, verifyEmail, resendVerificationCode, pendingVerification } = useSession();
   const { t, language, setLanguage } = useI18n();
+  const { palette } = useUi();
+
   const [isRegister, setIsRegister] = useState(false);
   const [email, setEmail] = useState('alice@padely.app');
   const [password, setPassword] = useState('padely2026');
   const [displayName, setDisplayName] = useState('Alice');
-  const [unknownLevel, setUnknownLevel] = useState(false);
-  const [level, setLevel] = useState(4);
-  const [quizAnswers, setQuizAnswers] = useState({});
   const [verificationCode, setVerificationCode] = useState('');
-  const [error, setError] = useState('');
+  const [globalError, setGlobalError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [fieldErrors, setFieldErrors] = useState({});
 
-  const quizReady = useMemo(() => QUIZ.every((q) => quizAnswers[q.key]), [quizAnswers]);
-  const levelDescriptions = useMemo(() => ({
-    1: t('auth.level1'),
-    2: t('auth.level2'),
-    3: t('auth.level3'),
-    4: t('auth.level4'),
-    5: t('auth.level5'),
-    6: t('auth.level6'),
-    7: t('auth.level7'),
-    8: t('auth.level8'),
-  }), [t]);
+  const titleIn = useSharedValue(0);
+  const formIn = useSharedValue(0);
+  const ctaIn = useSharedValue(0);
+  const emailShake = useSharedValue(0);
+  const passwordShake = useSharedValue(0);
+  const displayNameShake = useSharedValue(0);
+  const verificationCodeShake = useSharedValue(0);
+
+  useEffect(() => {
+    titleIn.value = withTiming(1, { duration: 320, easing: Easing.out(Easing.cubic) });
+    formIn.value = withDelay(130, withTiming(1, { duration: 320, easing: Easing.out(Easing.cubic) }));
+    ctaIn.value = withDelay(250, withTiming(1, { duration: 300, easing: Easing.out(Easing.cubic) }));
+  }, [ctaIn, formIn, titleIn]);
 
   useEffect(() => {
     if (pendingVerification?.devCode) {
@@ -64,533 +49,365 @@ export function AuthScreen() {
     }
   }, [pendingVerification?.devCode]);
 
-  async function submit() {
-    setError('');
+  const titleAnimated = useAnimatedStyle(() => ({
+    opacity: titleIn.value,
+    transform: [{ scale: interpolate(titleIn.value, [0, 1], [0.95, 1]) }],
+  }));
+
+  const formAnimated = useAnimatedStyle(() => ({
+    opacity: formIn.value,
+    transform: [{ translateY: interpolate(formIn.value, [0, 1], [20, 0]) }],
+  }));
+
+  const ctaAnimated = useAnimatedStyle(() => ({
+    opacity: ctaIn.value,
+    transform: [{ translateY: interpolate(ctaIn.value, [0, 1], [14, 0]) }],
+  }));
+
+  function triggerShake(sharedValue) {
+    sharedValue.value = withSequence(
+      withTiming(-10, { duration: 45 }),
+      withTiming(9, { duration: 45 }),
+      withTiming(-6, { duration: 40 }),
+      withTiming(4, { duration: 36 }),
+      withTiming(0, { duration: 34 })
+    );
+  }
+
+  const emailShakeStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: emailShake.value }],
+  }));
+  const passwordShakeStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: passwordShake.value }],
+  }));
+  const displayNameShakeStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: displayNameShake.value }],
+  }));
+  const verificationCodeShakeStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: verificationCodeShake.value }],
+  }));
+
+  function clearErrors() {
+    setFieldErrors({});
+    setGlobalError('');
+  }
+
+  async function submitAuth() {
+    clearErrors();
+    setNotice('');
     try {
       if (isRegister) {
-        if (unknownLevel && !quizReady) {
-          throw new Error(t('auth.msgCompleteQuiz'));
-        }
-
-        const finalLevel = unknownLevel ? inferLevelFromQuiz(quizAnswers) : level;
         const out = await register(
           email.trim(),
           password,
           displayName.trim() || 'Player',
-          {
-            level: finalLevel,
-            quizAnswers: unknownLevel ? quizAnswers : null,
-          }
+          { level: 4, quizAnswers: null }
         );
-        if (out.requiresEmailVerification) {
-          setError(t('auth.msgCodeSent'));
+        if (out?.requiresEmailVerification) {
+          setNotice(t('auth.msgCodeSent'));
         }
       } else {
         await login(email.trim(), password);
       }
     } catch (e) {
-      setError(e.message);
+      const nextFieldErrors = fieldErrorsFromApiError(e);
+      setFieldErrors(nextFieldErrors);
+      if (nextFieldErrors.email) triggerShake(emailShake);
+      if (nextFieldErrors.password) triggerShake(passwordShake);
+      if (nextFieldErrors.displayName) triggerShake(displayNameShake);
+      if (!Object.keys(nextFieldErrors).length) {
+        setGlobalError(e.message);
+      }
     }
   }
 
   async function submitVerification() {
-    setError('');
+    clearErrors();
+    setNotice('');
+    if (!verificationCode.trim()) {
+      setFieldErrors({ code: 'Code requis' });
+      triggerShake(verificationCodeShake);
+      return;
+    }
     try {
       await verifyEmail(verificationCode);
     } catch (e) {
-      setError(e.message);
+      const nextFieldErrors = fieldErrorsFromApiError(e);
+      const codeError = firstFieldError(nextFieldErrors, ['code', 'token']);
+      if (codeError) {
+        setFieldErrors({ code: codeError });
+        triggerShake(verificationCodeShake);
+      } else {
+        setGlobalError(e.message);
+      }
     }
   }
 
   async function resendCode() {
-    setError('');
+    clearErrors();
+    setNotice('');
     try {
       const out = await resendVerificationCode();
-      if (out.alreadyVerified) {
-        setError(t('auth.msgAlreadyVerified'));
-        return;
-      }
-      if (out.devCode) {
+      if (out?.devCode) {
         setVerificationCode(out.devCode);
       }
-      setError(t('auth.msgCodeResent'));
+      setNotice(t('auth.msgCodeResent'));
     } catch (e) {
-      setError(e.message);
+      setGlobalError(e.message);
     }
   }
 
   return (
-    <View style={styles.root}>
-      <Backdrop />
-      <KeyboardAvoidingView style={styles.keyboard} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.hero}>
-            <View style={styles.langRow}>
-              <Pressable
-                style={[styles.langBtn, language === 'fr' && styles.langBtnActive]}
-                onPress={() => setLanguage('fr')}
-              >
-                <Text style={[styles.langBtnText, language === 'fr' && styles.langBtnTextActive]}>FR</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.langBtn, language === 'en' && styles.langBtnActive]}
-                onPress={() => setLanguage('en')}
-              >
-                <Text style={[styles.langBtnText, language === 'en' && styles.langBtnTextActive]}>EN</Text>
-              </Pressable>
-            </View>
-            <Text style={styles.kicker}>{t('app.splashKicker')}</Text>
-            <Text style={styles.title}>PADELY</Text>
-            <Text style={styles.subtitle}>{t('auth.subtitle')}</Text>
-            <View style={styles.featureRow}>
-              <Text style={styles.featureChip}>{t('auth.featureLive')}</Text>
-              <Text style={styles.featureChip}>{t('auth.featurePir')}</Text>
-              <Text style={styles.featureChip}>{t('auth.featureCommunity')}</Text>
-            </View>
-          </View>
+    <View style={[styles.root, { backgroundColor: palette.bg }]}>
+      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <View style={styles.content}>
+          <Animated.View style={titleAnimated}>
+            <Text style={[styles.brand, { color: palette.accent }]}>PADELY</Text>
+            <Text style={[styles.tagline, { color: palette.textSecondary ?? palette.muted }]}>Ta performance, sublimee.</Text>
+          </Animated.View>
 
-          <Card style={styles.form} elevated>
-            {pendingVerification ? (
-              <View style={styles.verifyBox}>
-                <Text style={styles.verifyTitle}>{t('auth.verifyPending')}</Text>
-                <Text style={styles.verifyText}>
+          {pendingVerification ? (
+            <Animated.View style={formAnimated}>
+              <View style={[styles.verifyCard, { backgroundColor: palette.bgAlt, borderColor: palette.lineMedium ?? palette.line }]}>
+                <Text style={[styles.verifyTitle, { color: palette.text }]}>{t('auth.verifyPending')}</Text>
+                <Text style={[styles.verifyMeta, { color: palette.textSecondary ?? palette.muted }]}>
                   {t('auth.account', { email: pendingVerification.maskedEmail ?? pendingVerification.email })}
                 </Text>
-                <Text style={styles.verifyMeta}>
-                  {t('auth.otpMeta', { minutes: pendingVerification.expiresInMinutes ?? 15 })}
-                </Text>
-                <Text style={styles.verifyMeta}>
-                  {t('auth.emailChannel', {
-                    provider: pendingVerification.verificationProvider === 'none'
-                      ? t('auth.notConfigured')
-                      : pendingVerification.verificationProvider,
-                  })}
-                </Text>
-                <TextInput
-                  value={verificationCode}
-                  onChangeText={setVerificationCode}
-                  style={styles.input}
-                  placeholder={t('auth.otpPlaceholder')}
-                  placeholderTextColor={theme.colors.muted}
-                  keyboardType="number-pad"
-                  maxLength={6}
-                />
+                <Animated.View style={verificationCodeShakeStyle}>
+                  <TextInput
+                    value={verificationCode}
+                    onChangeText={(value) => {
+                      setVerificationCode(value);
+                      setFieldErrors((prev) => ({ ...prev, code: '' }));
+                    }}
+                    style={[styles.input, { color: palette.text, borderColor: fieldErrors.code ? palette.danger : (palette.lineMedium ?? palette.line), backgroundColor: palette.bgElevated ?? palette.cardStrong }]}
+                    placeholder={t('auth.otpPlaceholder')}
+                    placeholderTextColor={palette.muted}
+                    keyboardType="number-pad"
+                    maxLength={6}
+                  />
+                </Animated.View>
+                {!!fieldErrors.code ? (
+                  <Text style={[styles.fieldError, { color: palette.danger }]}>{fieldErrors.code}</Text>
+                ) : null}
                 <View style={styles.verifyActions}>
-                  <Pressable style={[styles.verifyBtn, styles.verifyBtnMain]} onPress={submitVerification}>
-                    <Text style={styles.verifyBtnText}>{t('auth.verifyEmail')}</Text>
+                  <Pressable style={[styles.primaryBtnSmall, { backgroundColor: palette.accent }]} onPress={submitVerification}>
+                    <Text style={[styles.primaryBtnText, { color: palette.accentText ?? '#09090B' }]}>{t('auth.verifyEmail')}</Text>
                   </Pressable>
-                  <Pressable style={styles.resendBtn} onPress={resendCode}>
-                    <Text style={styles.resendBtnText}>{t('auth.resend')}</Text>
+                  <Pressable style={[styles.secondaryBtnSmall, { borderColor: palette.accent }]} onPress={resendCode}>
+                    <Text style={[styles.secondaryBtnText, { color: palette.accent }]}>{t('auth.resend')}</Text>
                   </Pressable>
                 </View>
-                {pendingVerification.devCode ? (
-                  <Text style={styles.hint}>{t('auth.devCode', { code: pendingVerification.devCode })}</Text>
-                ) : (
-                  <Text style={styles.hint}>{t('auth.spamHint')}</Text>
-                )}
               </View>
-            ) : null}
+            </Animated.View>
+          ) : null}
 
-            <View style={styles.switch}>
-              <Pressable style={[styles.switchBtn, !isRegister && styles.switchBtnActive]} onPress={() => setIsRegister(false)}>
-                <Text style={[styles.switchLabel, !isRegister && styles.switchLabelActive]}>{t('auth.login')}</Text>
-              </Pressable>
-              <Pressable style={[styles.switchBtn, isRegister && styles.switchBtnActive]} onPress={() => setIsRegister(true)}>
-                <Text style={[styles.switchLabel, isRegister && styles.switchLabelActive]}>{t('auth.register')}</Text>
-              </Pressable>
-            </View>
-
-            <TextInput value={email} onChangeText={setEmail} autoCapitalize="none" style={styles.input} placeholder={t('auth.email')} placeholderTextColor={theme.colors.muted} />
-            <TextInput value={password} onChangeText={setPassword} secureTextEntry style={styles.input} placeholder={t('auth.password')} placeholderTextColor={theme.colors.muted} />
-
+          <Animated.View style={[styles.form, formAnimated]}>
+            <Animated.View style={emailShakeStyle}>
+              <TextInput
+                value={email}
+                onChangeText={(value) => {
+                  setEmail(value);
+                  setFieldErrors((prev) => ({ ...prev, email: '' }));
+                }}
+                autoCapitalize="none"
+                style={[styles.input, { color: palette.text, borderColor: fieldErrors.email ? palette.danger : (palette.lineMedium ?? palette.line), backgroundColor: palette.bgElevated ?? palette.cardStrong }]}
+                placeholder={t('auth.email')}
+                placeholderTextColor={palette.muted}
+              />
+            </Animated.View>
+            {!!fieldErrors.email ? <Text style={[styles.fieldError, { color: palette.danger }]}>{fieldErrors.email}</Text> : null}
+            <Animated.View style={passwordShakeStyle}>
+              <TextInput
+                value={password}
+                onChangeText={(value) => {
+                  setPassword(value);
+                  setFieldErrors((prev) => ({ ...prev, password: '' }));
+                }}
+                secureTextEntry
+                style={[styles.input, { color: palette.text, borderColor: fieldErrors.password ? palette.danger : (palette.lineMedium ?? palette.line), backgroundColor: palette.bgElevated ?? palette.cardStrong }]}
+                placeholder={t('auth.password')}
+                placeholderTextColor={palette.muted}
+              />
+            </Animated.View>
+            {!!fieldErrors.password ? <Text style={[styles.fieldError, { color: palette.danger }]}>{fieldErrors.password}</Text> : null}
             {isRegister ? (
               <>
-                <TextInput value={displayName} onChangeText={setDisplayName} style={styles.input} placeholder={t('auth.displayName')} placeholderTextColor={theme.colors.muted} />
-
-                <View style={styles.optionRow}>
-                  <Text style={styles.optionLabel}>{t('auth.unknownLevel')}</Text>
-                  <Pressable
-                    style={[styles.smallToggle, unknownLevel && styles.smallToggleActive]}
-                    onPress={() => setUnknownLevel((v) => !v)}
-                  >
-                    <Text style={[styles.smallToggleText, unknownLevel && styles.smallToggleTextActive]}>
-                      {unknownLevel ? t('auth.yes') : t('auth.no')}
-                    </Text>
-                  </Pressable>
-                </View>
-
-                {!unknownLevel ? (
-                  <>
-                    <Text style={styles.cardLabel}>{t('auth.levelLabel')}</Text>
-                    <View style={styles.levelGrid}>
-                      {[1, 2, 3, 4, 5, 6, 7, 8].map((value) => (
-                        <Pressable
-                          key={String(value)}
-                          style={[styles.levelChip, value === level && styles.levelChipActive]}
-                          onPress={() => setLevel(value)}
-                        >
-                          <Text style={[styles.levelText, value === level && styles.levelTextActive]}>{value}</Text>
-                        </Pressable>
-                      ))}
-                    </View>
-                    <Text style={styles.hint}>{levelDescriptions[level]}</Text>
-                  </>
-                ) : (
-                  <>
-                    <Text style={styles.cardLabel}>{t('auth.quizLabel')}</Text>
-                    {QUIZ.map((q) => (
-                      <View key={q.key} style={styles.quizRow}>
-                        <Text style={styles.quizLabel}>{t(q.i18n)}</Text>
-                        <View style={styles.quizOptions}>
-                          {[1, 2, 3, 4, 5].map((value) => {
-                            const active = Number(quizAnswers[q.key]) === value;
-                            return (
-                              <Pressable
-                                key={`${q.key}-${value}`}
-                                style={[styles.quizChip, active && styles.quizChipActive]}
-                                onPress={() => setQuizAnswers((prev) => ({ ...prev, [q.key]: value }))}
-                              >
-                                <Text style={[styles.quizChipText, active && styles.quizChipTextActive]}>{value}</Text>
-                              </Pressable>
-                            );
-                          })}
-                        </View>
-                      </View>
-                    ))}
-                    <Text style={styles.hint}>{t('auth.quizEstimated', { level: inferLevelFromQuiz(quizAnswers) })}</Text>
-                  </>
-                )}
+                <Animated.View style={displayNameShakeStyle}>
+                  <TextInput
+                    value={displayName}
+                    onChangeText={(value) => {
+                      setDisplayName(value);
+                      setFieldErrors((prev) => ({ ...prev, displayName: '' }));
+                    }}
+                    style={[styles.input, { color: palette.text, borderColor: fieldErrors.displayName ? palette.danger : (palette.lineMedium ?? palette.line), backgroundColor: palette.bgElevated ?? palette.cardStrong }]}
+                    placeholder={t('auth.displayName')}
+                    placeholderTextColor={palette.muted}
+                  />
+                </Animated.View>
+                {!!fieldErrors.displayName ? (
+                  <Text style={[styles.fieldError, { color: palette.danger }]}>{fieldErrors.displayName}</Text>
+                ) : null}
               </>
             ) : null}
+          </Animated.View>
 
-            {error ? <Text style={styles.error}>{error}</Text> : null}
+          {!!globalError ? <Text style={[styles.error, { color: palette.warning }]}>{globalError}</Text> : null}
+          {!!notice ? <Text style={[styles.notice, { color: palette.accent2 }]}>{notice}</Text> : null}
 
-            <Pressable style={styles.cta} onPress={submit}>
-              <Text style={styles.ctaLabel}>{isRegister ? t('auth.createProfile') : t('auth.enter')}</Text>
+          <Animated.View style={ctaAnimated}>
+            <Pressable style={[styles.primaryBtn, { backgroundColor: palette.accent }]} onPress={submitAuth}>
+              <Text style={[styles.primaryBtnText, { color: palette.accentText ?? '#09090B' }]}>
+                {isRegister ? t('auth.createProfile') : t('auth.enter')}
+              </Text>
             </Pressable>
 
-            <Text style={styles.hint}>{t('auth.testAccount')}</Text>
-          </Card>
-        </ScrollView>
+            <Pressable style={styles.switchLine} onPress={() => setIsRegister((v) => !v)}>
+              <Text style={[styles.switchText, { color: palette.textSecondary ?? palette.muted }]}>
+                {isRegister ? 'Deja inscrit ? Connexion' : 'Nouveau ici ? Inscription'}
+              </Text>
+            </Pressable>
+          </Animated.View>
+
+          <View style={styles.langRow}>
+            <Pressable onPress={() => setLanguage('fr')}>
+              <Text style={[styles.lang, { color: language === 'fr' ? palette.accent : palette.muted }]}>FR</Text>
+            </Pressable>
+            <Text style={[styles.langDot, { color: palette.muted }]}>·</Text>
+            <Pressable onPress={() => setLanguage('en')}>
+              <Text style={[styles.lang, { color: language === 'en' ? palette.accent : palette.muted }]}>EN</Text>
+            </Pressable>
+          </View>
+        </View>
       </KeyboardAvoidingView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: {
+  root: { flex: 1 },
+  flex: { flex: 1 },
+  content: {
     flex: 1,
-    backgroundColor: theme.colors.bg,
-  },
-  keyboard: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
     justifyContent: 'center',
-    padding: 20,
-    gap: 14,
+    paddingHorizontal: 24,
+    paddingBottom: 28,
+    gap: 16,
   },
-  hero: {
-    marginBottom: 6,
-  },
-  langRow: {
-    flexDirection: 'row',
-    alignSelf: 'flex-end',
-    gap: 6,
-    marginBottom: 8,
-  },
-  langBtn: {
-    minHeight: 28,
-    minWidth: 46,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#4E6F87',
-    backgroundColor: 'rgba(18, 51, 72, 0.7)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  langBtnActive: {
-    borderColor: '#F4D35E',
-    backgroundColor: '#F4D35E',
-  },
-  langBtnText: {
-    color: '#D8EBFA',
-    fontFamily: theme.fonts.title,
-    fontSize: 11,
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-  },
-  langBtnTextActive: {
-    color: '#3A2500',
-  },
-  kicker: {
-    color: theme.colors.accent2,
-    fontFamily: theme.fonts.mono,
-    letterSpacing: 1,
-    fontSize: 11,
-  },
-  title: {
-    color: theme.colors.text,
-    fontSize: 56,
-    lineHeight: 58,
+  brand: {
     fontFamily: theme.fonts.display,
-    letterSpacing: 1,
+    fontSize: 52,
+    letterSpacing: 12,
+    textAlign: 'center',
   },
-  subtitle: {
-    color: theme.colors.muted,
+  tagline: {
+    marginTop: 10,
+    textAlign: 'center',
     fontFamily: theme.fonts.body,
-    fontSize: 14,
-    marginTop: 2,
+    fontSize: 15,
   },
-  featureRow: {
-    marginTop: 8,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-  },
-  featureChip: {
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 999,
+  verifyCard: {
     borderWidth: 1,
-    borderColor: '#4A6E86',
-    backgroundColor: 'rgba(18, 51, 72, 0.66)',
-    color: '#D8EBFA',
+    borderRadius: 16,
+    padding: 14,
+    gap: 10,
+  },
+  verifyTitle: {
     fontFamily: theme.fonts.title,
-    fontSize: 10,
+    fontSize: 14,
+    letterSpacing: 0.6,
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
+  },
+  verifyMeta: {
+    fontFamily: theme.fonts.body,
+    fontSize: 12,
   },
   form: {
     gap: 10,
   },
-  verifyBox: {
+  input: {
+    minHeight: 54,
     borderWidth: 1,
-    borderColor: theme.colors.line,
-    borderRadius: 12,
-    padding: 10,
-    backgroundColor: 'rgba(20, 56, 76, 0.45)',
-    marginBottom: 6,
-    gap: 6,
-  },
-  verifyTitle: {
-    color: theme.colors.accent,
-    fontFamily: theme.fonts.title,
-    fontSize: 13,
-  },
-  verifyText: {
-    color: theme.colors.muted,
+    borderRadius: 14,
+    paddingHorizontal: 14,
     fontFamily: theme.fonts.body,
-    fontSize: 12,
   },
-  verifyMeta: {
-    color: theme.colors.text,
+  error: {
+    fontFamily: theme.fonts.body,
+    textAlign: 'center',
+    fontSize: 12,
+    minHeight: 18,
+  },
+  notice: {
+    fontFamily: theme.fonts.body,
+    textAlign: 'center',
+    fontSize: 12,
+    minHeight: 18,
+  },
+  fieldError: {
+    marginTop: -3,
+    marginBottom: 2,
     fontFamily: theme.fonts.body,
     fontSize: 11,
+  },
+  primaryBtn: {
+    minHeight: 56,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  primaryBtnSmall: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  primaryBtnText: {
+    fontFamily: theme.fonts.title,
+    fontSize: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  secondaryBtnSmall: {
+    minHeight: 44,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  secondaryBtnText: {
+    fontFamily: theme.fonts.title,
+    fontSize: 11,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
   },
   verifyActions: {
     flexDirection: 'row',
-    alignItems: 'center',
     gap: 8,
   },
-  verifyBtn: {
-    minHeight: 44,
-    borderRadius: 10,
-    justifyContent: 'center',
+  switchLine: {
+    marginTop: 12,
     alignItems: 'center',
   },
-  verifyBtnMain: {
-    flex: 1,
-    backgroundColor: '#2E6F5E',
-  },
-  verifyBtnText: {
-    color: '#ECFFF9',
-    fontFamily: theme.fonts.title,
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-    fontSize: 11,
-  },
-  resendBtn: {
-    minHeight: 44,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: theme.colors.line,
-    backgroundColor: theme.colors.bgAlt,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-  },
-  resendBtnText: {
-    color: theme.colors.text,
-    fontFamily: theme.fonts.title,
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-    fontSize: 11,
-  },
-  switch: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 4,
-  },
-  switchBtn: {
-    flex: 1,
-    minHeight: 42,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: theme.colors.chip,
-  },
-  switchBtnActive: {
-    backgroundColor: theme.colors.accent,
-  },
-  switchLabel: {
-    color: theme.colors.text,
-    fontFamily: theme.fonts.title,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    fontSize: 12,
-  },
-  switchLabelActive: {
-    color: '#3A2500',
-  },
-  input: {
-    minHeight: 54,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: theme.colors.line,
-    color: theme.colors.text,
-    paddingHorizontal: 14,
-    backgroundColor: theme.colors.bgAlt,
+  switchText: {
     fontFamily: theme.fonts.body,
-  },
-  optionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 4,
-  },
-  optionLabel: {
-    color: theme.colors.muted,
-    fontFamily: theme.fonts.body,
-    fontSize: 12,
-  },
-  smallToggle: {
-    minHeight: 30,
-    minWidth: 64,
-    borderRadius: 9,
-    borderWidth: 1,
-    borderColor: theme.colors.line,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: theme.colors.bgAlt,
-  },
-  smallToggleActive: {
-    backgroundColor: theme.colors.accent,
-    borderColor: theme.colors.accent,
-  },
-  smallToggleText: {
-    color: theme.colors.text,
-    fontFamily: theme.fonts.title,
-    fontSize: 11,
-  },
-  smallToggleTextActive: {
-    color: '#3A2500',
-  },
-  cardLabel: {
-    color: theme.colors.text,
-    fontFamily: theme.fonts.title,
     fontSize: 13,
   },
-  levelGrid: {
+  langRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 4,
     gap: 8,
   },
-  levelChip: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: theme.colors.line,
-    backgroundColor: theme.colors.bgAlt,
-  },
-  levelChipActive: {
-    backgroundColor: theme.colors.accent,
-    borderColor: theme.colors.accent,
-  },
-  levelText: {
-    color: theme.colors.text,
+  lang: {
     fontFamily: theme.fonts.title,
     fontSize: 12,
+    letterSpacing: 0.6,
   },
-  levelTextActive: {
-    color: '#3A2500',
-  },
-  quizRow: {
-    gap: 6,
-    marginTop: 4,
-  },
-  quizLabel: {
-    color: theme.colors.muted,
-    fontFamily: theme.fonts.body,
-    fontSize: 12,
-  },
-  quizOptions: {
-    flexDirection: 'row',
-    gap: 6,
-  },
-  quizChip: {
-    width: 30,
-    height: 30,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: theme.colors.line,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: theme.colors.bgAlt,
-  },
-  quizChipActive: {
-    backgroundColor: theme.colors.accent,
-    borderColor: theme.colors.accent,
-  },
-  quizChipText: {
-    color: theme.colors.text,
-    fontFamily: theme.fonts.title,
-    fontSize: 12,
-  },
-  quizChipTextActive: {
-    color: '#3A2500',
-  },
-  cta: {
-    minHeight: 56,
-    borderRadius: 14,
-    backgroundColor: theme.colors.accent,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 6,
-  },
-  ctaLabel: {
-    color: '#3A2500',
-    fontFamily: theme.fonts.title,
-    fontSize: 13,
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-  },
-  hint: {
-    color: theme.colors.muted,
-    fontFamily: theme.fonts.body,
-    fontSize: 11,
-    marginTop: 2,
-  },
-  error: {
-    color: theme.colors.danger,
-    fontFamily: theme.fonts.body,
+  langDot: {
+    fontSize: 14,
   },
 });

@@ -1,5 +1,16 @@
 export const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://127.0.0.1:8787';
 
+export class ApiError extends Error {
+  constructor(message, { status, code, field, issues } = {}) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status ?? null;
+    this.code = code ?? 'api_error';
+    this.field = field ?? null;
+    this.issues = Array.isArray(issues) ? issues : [];
+  }
+}
+
 async function request(path, { method = 'GET', body, token } = {}) {
   let response;
   try {
@@ -12,7 +23,9 @@ async function request(path, { method = 'GET', body, token } = {}) {
       body: body ? JSON.stringify(body) : undefined,
     });
   } catch {
-    throw new Error(`Connexion API impossible (${API_URL}). Lance le backend puis reessaie.`);
+    throw new ApiError(`Connexion API impossible (${API_URL}). Lance le backend puis reessaie.`, {
+      code: 'network_error',
+    });
   }
 
   const raw = await response.text();
@@ -28,7 +41,12 @@ async function request(path, { method = 'GET', body, token } = {}) {
   }
 
   if (!response.ok) {
-    throw new Error(payload.error || `HTTP ${response.status}`);
+    throw new ApiError(payload.message || payload.error || `HTTP ${response.status}`, {
+      status: response.status,
+      code: payload.error || 'api_error',
+      field: payload.field ?? null,
+      issues: payload.issues ?? [],
+    });
   }
 
   return payload;

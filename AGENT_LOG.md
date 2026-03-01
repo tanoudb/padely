@@ -97,3 +97,18 @@ Nouveau store `backend/src/store/sqliteStore.js` avec migrations automatiques (t
 ✅
 ### Prochaine mission recommandée
 VALIDATION INPUT + ERROR HANDLING
+
+## [2026-03-02] — Run #05
+### Mission
+VALIDATION INPUT + ERROR HANDLING
+### Résultat
+Les flux critiques sont maintenant blindés: inscription, connexion, création de match, validation de match et mise à jour profil sont validés par schémas zod avec erreurs structurées par champ (`error`, `field`, `message`, `issues`).
+Côté mobile, les erreurs s’affichent inline sous les inputs avec animation shake sur les champs invalides (Auth + Setup match), ce qui rend les corrections immédiates et claires pour le joueur.
+### Technique
+Backend: nouveaux modules `backend/src/api/validation.js` (schémas zod + `RequestValidationError`) et `backend/src/api/rateLimit.js` (rate limiter réutilisable). `backend/src/server.js` valide les payloads critiques avant services, retourne un format d’erreur uniforme et applique un rate limiting auth strict `5/min/IP` sur register/login/oauth. Dépendance `zod` déclarée dans `backend/package.json`.
+Mobile: `mobile/src/api/client.js` introduit `ApiError` structuré (status/code/field/issues), `mobile/src/utils/formErrors.js` mappe les erreurs backend vers les champs UI, `mobile/src/screens/AuthScreen.js` et `mobile/src/screens/play/PlaySetupScreen.js` affichent les erreurs inline + shake.
+Tests: `backend/test/requestValidation.test.js` couvre validation payloads et rate limiter auth (5 tentatives ok, 6e bloquée). Suite backend verte `24/24`.
+### Statut
+✅
+### Prochaine mission recommandée
+SYSTÈME DE COMMUNICATION TEMPS RÉEL

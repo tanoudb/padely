@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
+import Animated, { useAnimatedStyle, useSharedValue, withSequence, withTiming } from 'react-native-reanimated';
 import { Card } from '../../components/Card';
 import { api } from '../../api/client';
 import { useSession } from '../../state/session';
@@ -26,7 +27,10 @@ export function PlaySetupScreen() {
   const [pointRule, setPointRule] = useState(user.settings?.pointRule ?? 'punto_de_oro');
   const [totalCost, setTotalCost] = useState('48');
   const [feedback, setFeedback] = useState('');
+  const [fieldErrors, setFieldErrors] = useState({});
   const [highlightedMatch, setHighlightedMatch] = useState(null);
+  const guestNameShake = useSharedValue(0);
+  const totalCostShake = useSharedValue(0);
 
   const highlightedMatchId = route.params?.matchId ? String(route.params.matchId) : null;
 
@@ -82,6 +86,23 @@ export function PlaySetupScreen() {
     }
   }
 
+  function triggerShake(sharedValue) {
+    sharedValue.value = withSequence(
+      withTiming(-10, { duration: 45 }),
+      withTiming(9, { duration: 45 }),
+      withTiming(-6, { duration: 40 }),
+      withTiming(4, { duration: 36 }),
+      withTiming(0, { duration: 34 })
+    );
+  }
+
+  const guestNameShakeStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: guestNameShake.value }],
+  }));
+  const totalCostShakeStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: totalCostShake.value }],
+  }));
+
   function toggleUser(playerId) {
     setSelectedUsers((prev) => {
       if (prev.includes(playerId)) {
@@ -101,6 +122,8 @@ export function PlaySetupScreen() {
     }
     const safeName = guestName.trim();
     if (!safeName) {
+      setFieldErrors((prev) => ({ ...prev, guestName: 'Entre un nom invite.' }));
+      triggerShake(guestNameShake);
       setFeedback('Entre un nom invite.');
       return;
     }
@@ -115,6 +138,7 @@ export function PlaySetupScreen() {
       level: 'Intermediaire',
     }]);
     setGuestName('');
+    setFieldErrors((prev) => ({ ...prev, guestName: '' }));
     setFeedback('');
   }
 
@@ -123,8 +147,17 @@ export function PlaySetupScreen() {
   }
 
   function launchMatch() {
+    setFieldErrors({});
     if (selectedSlots.length !== 3) {
       setFeedback('Mode 2v2: ajoute 3 joueurs en plus de toi.');
+      return;
+    }
+
+    const parsedTotalCost = Number(totalCost);
+    if (!Number.isFinite(parsedTotalCost) || parsedTotalCost < 0 || parsedTotalCost > 2000) {
+      setFieldErrors((prev) => ({ ...prev, totalCost: 'Cout invalide (0 a 2000 EUR).' }));
+      triggerShake(totalCostShake);
+      setFeedback('Corrige le cout terrain.');
       return;
     }
 
@@ -135,7 +168,7 @@ export function PlaySetupScreen() {
       matchMode,
       matchFormat,
       pointRule,
-      totalCostEur: Number(totalCost) || 0,
+      totalCostEur: parsedTotalCost,
       startedAt: new Date().toISOString(),
     };
     navigation.navigate('PlayScoring', { setup });
@@ -209,18 +242,24 @@ export function PlaySetupScreen() {
 
         {matchMode === 'friendly' ? (
           <View style={styles.guestRow}>
-            <TextInput
-              style={[styles.input, { color: palette.text, borderColor: palette.lineMedium ?? palette.line, backgroundColor: palette.bgAlt }]}
-              placeholder="Nom invite"
-              placeholderTextColor={palette.muted}
-              value={guestName}
-              onChangeText={setGuestName}
-            />
+            <Animated.View style={[styles.inputWrap, guestNameShakeStyle]}>
+              <TextInput
+                style={[styles.input, { color: palette.text, borderColor: fieldErrors.guestName ? palette.danger : (palette.lineMedium ?? palette.line), backgroundColor: palette.bgAlt }]}
+                placeholder="Nom invite"
+                placeholderTextColor={palette.muted}
+                value={guestName}
+                onChangeText={(value) => {
+                  setGuestName(value);
+                  setFieldErrors((prev) => ({ ...prev, guestName: '' }));
+                }}
+              />
+            </Animated.View>
             <Pressable style={[styles.guestBtn, { backgroundColor: palette.cardStrong }]} onPress={addGuest}>
               <Text style={[styles.guestBtnText, { color: palette.text }]}>Ajouter</Text>
             </Pressable>
           </View>
         ) : null}
+        {!!fieldErrors.guestName ? <Text style={[styles.fieldError, { color: palette.danger }]}>{fieldErrors.guestName}</Text> : null}
 
         <View style={styles.wrap}>
           {guests.map((g) => (
@@ -273,14 +312,20 @@ export function PlaySetupScreen() {
           ))}
         </View>
 
-        <TextInput
-          style={[styles.input, { color: palette.text, borderColor: palette.lineMedium ?? palette.line, backgroundColor: palette.bgAlt }]}
-          placeholder="Cout terrain (EUR)"
-          placeholderTextColor={palette.muted}
-          keyboardType="numeric"
-          value={totalCost}
-          onChangeText={setTotalCost}
-        />
+        <Animated.View style={totalCostShakeStyle}>
+          <TextInput
+            style={[styles.input, { color: palette.text, borderColor: fieldErrors.totalCost ? palette.danger : (palette.lineMedium ?? palette.line), backgroundColor: palette.bgAlt }]}
+            placeholder="Cout terrain (EUR)"
+            placeholderTextColor={palette.muted}
+            keyboardType="numeric"
+            value={totalCost}
+            onChangeText={(value) => {
+              setTotalCost(value);
+              setFieldErrors((prev) => ({ ...prev, totalCost: '' }));
+            }}
+          />
+        </Animated.View>
+        {!!fieldErrors.totalCost ? <Text style={[styles.fieldError, { color: palette.danger }]}>{fieldErrors.totalCost}</Text> : null}
       </Card>
 
       {!!feedback ? <Text style={[styles.feedback, { color: palette.warning }]}>{feedback}</Text> : null}
@@ -314,12 +359,14 @@ const styles = StyleSheet.create({
   chipText: { fontFamily: theme.fonts.title, fontSize: 11 },
   meta: { marginTop: 8, fontFamily: theme.fonts.body, fontSize: 12 },
   guestRow: { flexDirection: 'row', gap: 8, marginTop: 10, marginBottom: 8 },
+  inputWrap: { flex: 1 },
   input: { flex: 1, minHeight: 52, borderWidth: 1, borderRadius: 14, paddingHorizontal: 12, fontFamily: theme.fonts.body },
   guestBtn: { minWidth: 90, borderRadius: 14, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 10 },
   guestBtnText: { fontFamily: theme.fonts.title, textTransform: 'uppercase', letterSpacing: 0.7, fontSize: 11 },
   smallChoice: { flex: 1, minHeight: 42, borderWidth: 1, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
   smallChoiceText: { fontFamily: theme.fonts.title, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.6 },
   feedback: { fontFamily: theme.fonts.body, fontSize: 12 },
+  fieldError: { marginTop: -2, marginBottom: 6, fontFamily: theme.fonts.body, fontSize: 11 },
   launchBtn: { minHeight: 60, borderRadius: 16, justifyContent: 'center', alignItems: 'center' },
   launchText: { fontFamily: theme.fonts.title, fontSize: 12, textTransform: 'uppercase', letterSpacing: 1.1 },
 });

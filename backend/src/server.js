@@ -1,6 +1,15 @@
 import http from 'node:http';
 import { HttpError, json, readJson } from './api/http.js';
+import { createRateLimiter } from './api/rateLimit.js';
 import { parseUrl, pathMatch } from './api/router.js';
+import {
+  RequestValidationError,
+  validateCreateMatchPayload,
+  validateLoginPayload,
+  validateMatchDecisionPayload,
+  validateRegisterPayload,
+  validateUpdateProfilePayload,
+} from './api/validation.js';
 import { requireAdmin, requireAuth } from './api/auth.js';
 import { evaluateMatch } from './engine/matchEngine.js';
 import { findBalancedMatches } from './engine/matchmaking.js';
@@ -68,7 +77,23 @@ const port = process.env.PORT ? Number(process.env.PORT) : 8787;
 const host = process.env.HOST ?? '0.0.0.0';
 const RATE_LIMIT_WINDOW_MS = Math.max(5_000, Number(process.env.RATE_LIMIT_WINDOW_MS ?? 60_000));
 const RATE_LIMIT_MAX = Math.max(20, Number(process.env.RATE_LIMIT_MAX ?? 180));
-const rateBuckets = new Map();
+const AUTH_RATE_LIMIT_WINDOW_MS = Math.max(5_000, Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS ?? 60_000));
+const AUTH_RATE_LIMIT_MAX = Math.max(1, Number(process.env.AUTH_RATE_LIMIT_MAX ?? 5));
+const authAttemptPaths = new Set([
+  '/api/v1/auth/register',
+  '/api/v1/auth/login',
+  '/api/v1/auth/oauth/google',
+  '/api/v1/auth/oauth/apple',
+]);
+const globalRateLimiter = createRateLimiter({
+  windowMs: RATE_LIMIT_WINDOW_MS,
+  max: RATE_LIMIT_MAX,
+});
+const authRateLimiter = createRateLimiter({
+  windowMs: AUTH_RATE_LIMIT_WINDOW_MS,
+  max: AUTH_RATE_LIMIT_MAX,
+  message: 'Trop de tentatives auth. Reessaye dans 1 minute.',
+});
 await seedDemoData();
 
 function maybeNumber(value) {
@@ -89,19 +114,13 @@ function enforceRateLimit(req, pathname) {
   if (!pathname.startsWith('/api/')) {
     return;
   }
-  const now = Date.now();
-  const key = `${getClientKey(req)}:${pathname}`;
-  const current = rateBuckets.get(key) ?? { count: 0, windowStart: now };
 
-  if (now - current.windowStart > RATE_LIMIT_WINDOW_MS) {
-    current.count = 0;
-    current.windowStart = now;
-  }
-  current.count += 1;
-  rateBuckets.set(key, current);
+  const ipKey = getClientKey(req);
+  globalRateLimiter.consume(`${ipKey}:${pathname}`);
 
-  if (current.count > RATE_LIMIT_MAX) {
-    throw new HttpError(429, 'Rate limit exceeded');
+  const isAuthAttempt = req.method === 'POST' && authAttemptPaths.has(pathname);
+  if (isAuthAttempt) {
+    authRateLimiter.consume(ipKey);
   }
 }
 
@@ -146,12 +165,12 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && url.pathname === '/api/v1/auth/register') {
-      const payload = await readJson(req);
+      const payload = validateRegisterPayload(await readJson(req));
       return json(res, 201, await registerWithEmail(payload));
     }
 
     if (req.method === 'POST' && url.pathname === '/api/v1/auth/login') {
-      const payload = await readJson(req);
+      const payload = validateLoginPayload(await readJson(req));
       return json(res, 200, await loginWithEmail(payload));
     }
 
@@ -195,7 +214,7 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'PUT' && url.pathname === '/api/v1/profile/athlete') {
       const me = await requireAuth(req);
-      const payload = await readJson(req);
+      const payload = validateUpdateProfilePayload(await readJson(req));
       return json(res, 200, await updateAthleteProfile(me.id, payload));
     }
 
@@ -224,7 +243,7 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'POST' && url.pathname === '/api/v1/matches') {
       const me = await requireAuth(req);
-      const payload = await readJson(req);
+      const payload = validateCreateMatchPayload(await readJson(req));
       return json(res, 201, await createMatch(payload, me.id));
     }
 
@@ -326,7 +345,7 @@ const server = http.createServer(async (req, res) => {
       const params = pathMatch(url.pathname, '/api/v1/matches/:matchId/validate');
       if (req.method === 'POST' && params) {
         const me = await requireAuth(req);
-        const payload = await readJson(req);
+        const payload = validateMatchDecisionPayload(await readJson(req));
         return json(res, 200, await validateMatch({
           matchId: params.matchId,
           userId: me.id,
@@ -544,12 +563,31 @@ const server = http.createServer(async (req, res) => {
       path: req.url,
     });
   } catch (error) {
+    if (error instanceof RequestValidationError) {
+      return json(res, 400, {
+        error: error.code,
+        field: error.field,
+        message: error.publicMessage,
+        issues: error.issues,
+      });
+    }
+
     const statusCode = inferStatusCode(error);
     if (statusCode >= 500) {
       console.error('[api-error]', error);
     }
+
+    const message = statusCode >= 500 ? 'Internal server error' : (error.publicMessage ?? error.message);
+    if (statusCode === 429) {
+      return json(res, statusCode, {
+        error: 'rate_limit',
+        message,
+      });
+    }
+
     return json(res, statusCode, {
-      error: statusCode >= 500 ? 'Internal server error' : (error.publicMessage ?? error.message),
+      error: statusCode >= 500 ? 'internal_error' : 'request_error',
+      message,
     });
   }
 });
