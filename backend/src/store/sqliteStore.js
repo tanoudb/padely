@@ -53,6 +53,7 @@ function normalizeUser(raw) {
     return null;
   }
 
+  const community = raw.community && typeof raw.community === 'object' ? raw.community : {};
   const user = {
     ...raw,
     athlete: raw.athlete ?? { weightKg: null, heightCm: null, level: null },
@@ -67,9 +68,17 @@ function normalizeUser(raw) {
       showGuestMatches: false,
       showHealthStats: true,
     },
-    community: raw.community ?? {
-      customChannels: [],
-      joinedClubChannels: [],
+    community: {
+      customChannels: Array.isArray(community.customChannels) ? community.customChannels : [],
+      joinedClubChannels: Array.isArray(community.joinedClubChannels) ? community.joinedClubChannels : [],
+      readMarkers: {
+        channels: community.readMarkers?.channels && typeof community.readMarkers.channels === 'object'
+          ? community.readMarkers.channels
+          : {},
+        dms: community.readMarkers?.dms && typeof community.readMarkers.dms === 'object'
+          ? community.readMarkers.dms
+          : {},
+      },
     },
     friends: Array.isArray(raw.friends) ? raw.friends : [],
     calibration: raw.calibration ?? {

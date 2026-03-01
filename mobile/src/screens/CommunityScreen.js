@@ -1,14 +1,15 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { useRoute } from '@react-navigation/native';
+import { useIsFocused, useRoute } from '@react-navigation/native';
 import * as Location from 'expo-location';
 import { LinearGradient } from 'expo-linear-gradient';
-import { api } from '../api/client';
+import { API_URL, api } from '../api/client';
 import { Card } from '../components/Card';
 import { QrScannerModal } from '../components/QrScannerModal';
 import { useI18n } from '../state/i18n';
 import { useSession } from '../state/session';
 import { theme } from '../theme';
+import { createCommunitySubscription } from '../utils/communityStream';
 
 const CITY_PRESETS = ['Lyon', 'Paris', 'Marseille', 'Bordeaux', 'Toulouse', 'Lille'];
 
@@ -121,6 +122,7 @@ function clubCodeFromQrValue(raw) {
 
 export function CommunityScreen() {
   const route = useRoute();
+  const isFocused = useIsFocused();
   const { token, user } = useSession();
   const { t } = useI18n();
 
@@ -139,6 +141,9 @@ export function CommunityScreen() {
   const [selectedChannel, setSelectedChannel] = useState('france');
   const [selectedClubChannel, setSelectedClubChannel] = useState('');
   const [channelCache, setChannelCache] = useState({});
+  const [channelPaging, setChannelPaging] = useState({});
+  const [dmPaging, setDmPaging] = useState({ hasMore: false, nextCursor: null, loading: false });
+  const streamRef = useRef(null);
 
   const [homeInput, setHomeInput] = useState('');
   const [regionalInput, setRegionalInput] = useState('');
@@ -179,11 +184,35 @@ export function CommunityScreen() {
     }
   }
 
-  async function refreshChannelMessages(channelKey) {
+  async function refreshChannelMessages(channelKey, options = {}) {
     if (!channelKey) return;
     try {
-      const list = await api.channelMessages(token, channelKey);
-      setChannelCache((prev) => ({ ...prev, [channelKey]: list }));
+      const page = await api.channelMessagesPage(token, channelKey, {
+        limit: options.limit ?? 40,
+        before: options.before,
+        markRead: options.markRead ? 1 : undefined,
+      });
+      setChannelCache((prev) => {
+        const current = prev[channelKey] ?? [];
+        if (options.append) {
+          const seen = new Set(current.map((item) => item.id));
+          const merged = [...page.items, ...current].filter((item) => {
+            if (!item?.id) return true;
+            if (seen.has(item.id)) return false;
+            seen.add(item.id);
+            return true;
+          });
+          return { ...prev, [channelKey]: merged };
+        }
+        return { ...prev, [channelKey]: page.items ?? [] };
+      });
+      setChannelPaging((prev) => ({
+        ...prev,
+        [channelKey]: {
+          hasMore: Boolean(page.hasMore),
+          nextCursor: page.nextCursor ?? null,
+        },
+      }));
     } catch (e) {
       setError(e.message);
     }
@@ -220,6 +249,68 @@ export function CommunityScreen() {
     }
   }
 
+  async function refreshDmMessages(friendId, options = {}) {
+    if (!friendId) {
+      setDmMessages([]);
+      setDmPaging({ hasMore: false, nextCursor: null, loading: false });
+      return;
+    }
+    try {
+      const page = await api.privateMessagesPage(token, friendId, {
+        limit: options.limit ?? 30,
+        before: options.before,
+        markRead: options.markRead ? 1 : undefined,
+      });
+      setDmMessages((prev) => {
+        if (options.append) {
+          const seen = new Set(prev.map((item) => item.id));
+          const merged = [...page.items, ...prev].filter((item) => {
+            if (!item?.id) return true;
+            if (seen.has(item.id)) return false;
+            seen.add(item.id);
+            return true;
+          });
+          return merged;
+        }
+        return page.items ?? [];
+      });
+      setDmPaging((prev) => ({
+        ...prev,
+        hasMore: Boolean(page.hasMore),
+        nextCursor: page.nextCursor ?? null,
+      }));
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  async function loadMoreDm() {
+    if (!selectedFriend || !dmPaging.hasMore || !dmPaging.nextCursor || dmPaging.loading) {
+      return;
+    }
+    setDmPaging((prev) => ({ ...prev, loading: true }));
+    await refreshDmMessages(selectedFriend, {
+      append: true,
+      before: dmPaging.nextCursor,
+      limit: 30,
+      markRead: false,
+    });
+    setDmPaging((prev) => ({ ...prev, loading: false }));
+  }
+
+  async function loadMoreChannel(channelKey) {
+    const page = channelPaging[channelKey];
+    if (!channelKey || !page?.hasMore || !page?.nextCursor) {
+      return;
+    }
+    await refreshChannelMessages(channelKey, {
+      append: true,
+      before: page.nextCursor,
+      limit: 40,
+      markRead: false,
+    });
+  }
+
   useEffect(() => {
     detectCityFromLocation().catch(() => {});
   }, []);
@@ -239,22 +330,20 @@ export function CommunityScreen() {
       setDmMessages([]);
       return;
     }
-    api.privateMessages(token, selectedFriend)
-      .then(setDmMessages)
-      .catch((e) => setError(e.message));
+    refreshDmMessages(selectedFriend, { markRead: true }).catch(() => {});
   }, [token, selectedFriend]);
 
   useEffect(() => {
-    refreshChannelMessages(selectedChannel).catch(() => {});
+    refreshChannelMessages(selectedChannel, { markRead: true }).catch(() => {});
   }, [selectedChannel]);
 
   useEffect(() => {
-    refreshChannelMessages(selectedRegionalChannel).catch(() => {});
-  }, [selectedRegionalChannel]);
+    refreshChannelMessages(selectedRegionalChannel, { markRead: activeTab === 'regional' }).catch(() => {});
+  }, [selectedRegionalChannel, activeTab]);
 
   useEffect(() => {
-    refreshChannelMessages(selectedClubChannel).catch(() => {});
-  }, [selectedClubChannel]);
+    refreshChannelMessages(selectedClubChannel, { markRead: activeTab === 'clubs' }).catch(() => {});
+  }, [selectedClubChannel, activeTab]);
 
   useEffect(() => {
     if (!routeFriendId) {
@@ -263,6 +352,76 @@ export function CommunityScreen() {
     setSelectedFriend(routeFriendId);
     setActiveTab('home');
   }, [routeFriendId]);
+
+  useEffect(() => {
+    if (!token || !user?.id || !isFocused) {
+      return undefined;
+    }
+
+    const tick = () => {
+      refreshCrew().catch(() => {});
+    };
+    const timer = setInterval(tick, 10_000);
+    return () => clearInterval(timer);
+  }, [token, user?.id, isFocused, city]);
+
+  useEffect(() => {
+    if (!token || !user?.id || !isFocused) {
+      if (streamRef.current) {
+        streamRef.current();
+        streamRef.current = null;
+      }
+      return undefined;
+    }
+
+    if (streamRef.current) {
+      streamRef.current();
+    }
+
+    streamRef.current = createCommunitySubscription({
+      apiUrl: API_URL,
+      token,
+      onEvent: ({ event, data }) => {
+        if (event === 'channel_message' && data?.message?.channel) {
+          const key = data.message.channel;
+          setChannelCache((prev) => {
+            const current = prev[key] ?? [];
+            if (current.some((item) => item.id === data.message.id)) {
+              return prev;
+            }
+            return { ...prev, [key]: [...current, data.message] };
+          });
+        }
+
+        if (event === 'dm_message' && data?.message) {
+          const msg = data.message;
+          const touchesSelected = selectedFriend
+            && (msg.fromUserId === selectedFriend || msg.toUserId === selectedFriend);
+          if (touchesSelected) {
+            setDmMessages((prev) => {
+              if (prev.some((item) => item.id === msg.id)) {
+                return prev;
+              }
+              return [...prev, msg];
+            });
+          }
+        }
+      },
+      onError: () => {},
+      onFallbackPoll: () => {
+        if (isFocused) {
+          refreshCrew().catch(() => {});
+        }
+      },
+    });
+
+    return () => {
+      if (streamRef.current) {
+        streamRef.current();
+        streamRef.current = null;
+      }
+    };
+  }, [token, user?.id, isFocused, selectedFriend]);
 
   const friends = crew?.friends ?? [];
   const publicChannels = crew?.publicChannels ?? [];
@@ -338,8 +497,7 @@ export function CommunityScreen() {
     try {
       await api.sendPrivateMessage(token, selectedFriend, dmInput.trim());
       setDmInput('');
-      const list = await api.privateMessages(token, selectedFriend);
-      setDmMessages(list);
+      await refreshDmMessages(selectedFriend, { markRead: true });
     } catch (e) {
       setError(e.message);
     }
@@ -403,8 +561,7 @@ export function CommunityScreen() {
     try {
       await refreshCrew();
       if (selectedFriend) {
-        const list = await api.privateMessages(token, selectedFriend);
-        setDmMessages(list);
+        await refreshDmMessages(selectedFriend, { markRead: true });
       }
     } finally {
       setRefreshing(false);
@@ -483,6 +640,11 @@ export function CommunityScreen() {
             {selectedFriend ? (
               <>
                 <View style={styles.dmBox}>
+                  {dmPaging.hasMore ? (
+                    <Pressable style={styles.loadMoreBtn} onPress={loadMoreDm}>
+                      <Text style={styles.loadMoreBtnText}>{t('community.loadMore')}</Text>
+                    </Pressable>
+                  ) : null}
                   {dmMessages.slice(-10).map((item, index) => (
                     <DmBubble
                       key={messageKey(item, index, 'dm')}
@@ -581,6 +743,11 @@ export function CommunityScreen() {
           </Card>
 
           <View style={styles.feedList}>
+            {channelPaging[selectedRegionalChannel]?.hasMore ? (
+              <Pressable style={styles.loadMoreBtn} onPress={() => loadMoreChannel(selectedRegionalChannel)}>
+                <Text style={styles.loadMoreBtnText}>{t('community.loadMore')}</Text>
+              </Pressable>
+            ) : null}
             {regionalFeed.map((item, index) => (
               <PostCard key={messageKey(item, index, 'regional')} item={item} mine={item.senderId === user.id} t={t} />
             ))}
@@ -631,6 +798,11 @@ export function CommunityScreen() {
             </Card>
 
             <View style={styles.feedList}>
+              {channelPaging[selectedChannel]?.hasMore ? (
+                <Pressable style={styles.loadMoreBtn} onPress={() => loadMoreChannel(selectedChannel)}>
+                  <Text style={styles.loadMoreBtnText}>{t('community.loadMore')}</Text>
+                </Pressable>
+              ) : null}
               {selectedChannelFeed.map((item, index) => (
                 <PostCard key={messageKey(item, index, 'channel')} item={item} mine={item.senderId === user.id} t={t} />
               ))}
@@ -706,6 +878,11 @@ export function CommunityScreen() {
           ) : null}
 
           <View style={styles.feedList}>
+            {channelPaging[selectedClubChannel]?.hasMore ? (
+              <Pressable style={styles.loadMoreBtn} onPress={() => loadMoreChannel(selectedClubChannel)}>
+                <Text style={styles.loadMoreBtnText}>{t('community.loadMore')}</Text>
+              </Pressable>
+            ) : null}
             {clubFeed.map((item, index) => (
               <PostCard key={messageKey(item, index, 'club')} item={item} mine={item.senderId === user.id} t={t} />
             ))}
@@ -945,6 +1122,22 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(7, 23, 34, 0.7)',
     padding: 10,
     gap: 8,
+  },
+  loadMoreBtn: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: `${theme.colors.accent2}33`,
+    borderWidth: 1,
+    borderColor: `${theme.colors.accent2}66`,
+  },
+  loadMoreBtnText: {
+    color: theme.colors.accent2,
+    fontFamily: theme.fonts.title,
+    fontSize: 11,
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
   },
   dmBubble: {
     maxWidth: '88%',

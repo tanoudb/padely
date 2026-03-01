@@ -19,8 +19,9 @@ import { PlayResultScreen } from './screens/play/PlayResultScreen';
 import { SessionProvider, useSession } from './state/session';
 import { I18nProvider, useI18n } from './state/i18n';
 import { UiProvider, useUi } from './state/ui';
-import { api } from './api/client';
+import { API_URL, api } from './api/client';
 import { theme } from './theme';
+import { createCommunitySubscription } from './utils/communityStream';
 import { getPushDataFromNotification, registerForRealtimePush, resolvePushRoute } from './utils/pushRealtime';
 
 const AuthStack = createNativeStackNavigator();
@@ -183,6 +184,7 @@ function MainRouter() {
   const [communityBadgeCount, setCommunityBadgeCount] = useState(0);
   const lastPushTokenRef = useRef('');
   const navRef = useRef(null);
+  const communityStreamRef = useRef(null);
 
   useEffect(() => {
     const timer = setTimeout(() => setBooting(false), 900);
@@ -231,6 +233,56 @@ function MainRouter() {
   }, [token, user?.id]);
 
   useEffect(() => {
+    if (!token || !user?.id) {
+      setCommunityBadgeCount(0);
+      if (communityStreamRef.current) {
+        communityStreamRef.current();
+        communityStreamRef.current = null;
+      }
+      return undefined;
+    }
+
+    let active = true;
+    const syncUnread = async () => {
+      try {
+        const unread = await api.communityUnread(token);
+        if (active) {
+          setCommunityBadgeCount(Math.max(0, Number(unread?.totalUnread ?? 0)));
+        }
+      } catch {
+        // Silent.
+      }
+    };
+
+    syncUnread().catch(() => {});
+    if (communityStreamRef.current) {
+      communityStreamRef.current();
+    }
+
+    communityStreamRef.current = createCommunitySubscription({
+      apiUrl: API_URL,
+      token,
+      onEvent: ({ data }) => {
+        if (data?.unread) {
+          setCommunityBadgeCount(Math.max(0, Number(data.unread.totalUnread ?? 0)));
+        }
+      },
+      onFallbackPoll: (payload) => {
+        setCommunityBadgeCount(Math.max(0, Number(payload?.totalUnread ?? 0)));
+      },
+      onError: () => {},
+    });
+
+    return () => {
+      active = false;
+      if (communityStreamRef.current) {
+        communityStreamRef.current();
+        communityStreamRef.current = null;
+      }
+    };
+  }, [token, user?.id]);
+
+  useEffect(() => {
     const receivedSub = Notifications.addNotificationReceivedListener(() => {
       setCommunityBadgeCount((prev) => Math.min(prev + 1, 99));
     });
@@ -276,7 +328,11 @@ function MainRouter() {
       ) : (
         <MainTabsNavigator
           communityBadgeCount={communityBadgeCount}
-          onCommunityFocus={() => setCommunityBadgeCount(0)}
+          onCommunityFocus={() => {
+            api.communityUnread(token)
+              .then((unread) => setCommunityBadgeCount(Math.max(0, Number(unread?.totalUnread ?? 0))))
+              .catch(() => {});
+          }}
         />
       )}
     </NavigationContainer>

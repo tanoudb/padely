@@ -22,6 +22,8 @@ const FALLBACK_CLUB_CHANNELS = [
   },
 ];
 
+const communitySubscribers = new Map();
+
 function normalize(text) {
   return String(text ?? '').trim();
 }
@@ -84,6 +86,30 @@ function normalizeArcadeTag(tag) {
   return normalizedLower(tag).replace(/\s+/g, '').replace('-', '');
 }
 
+function stablePairKey(userA, userB) {
+  return [String(userA ?? ''), String(userB ?? '')].sort().join(':');
+}
+
+function parseTimeMs(value) {
+  const ms = new Date(value ?? '').getTime();
+  return Number.isNaN(ms) ? 0 : ms;
+}
+
+function clampLimit(value, fallback, max) {
+  const parsed = Number(value);
+  if (Number.isNaN(parsed)) {
+    return fallback;
+  }
+  return Math.max(1, Math.min(max, Math.floor(parsed)));
+}
+
+function makeReadMarkers(raw = {}) {
+  return {
+    channels: raw.channels && typeof raw.channels === 'object' ? raw.channels : {},
+    dms: raw.dms && typeof raw.dms === 'object' ? raw.dms : {},
+  };
+}
+
 async function getClubs() {
   if (typeof store.listClubs === 'function') {
     const clubs = await store.listClubs();
@@ -133,10 +159,25 @@ async function channelTitleFromKey(channel) {
 }
 
 function getCommunityState(user) {
-  return user.community ?? {
+  const state = user.community ?? {
     customChannels: [],
     joinedClubChannels: [],
   };
+  return {
+    customChannels: Array.isArray(state.customChannels) ? state.customChannels : [],
+    joinedClubChannels: Array.isArray(state.joinedClubChannels) ? state.joinedClubChannels : [],
+    readMarkers: makeReadMarkers(state.readMarkers),
+  };
+}
+
+async function writeCommunityState(userId, nextState) {
+  await store.updateUser(userId, {
+    community: {
+      customChannels: nextState.customChannels,
+      joinedClubChannels: nextState.joinedClubChannels,
+      readMarkers: makeReadMarkers(nextState.readMarkers),
+    },
+  });
 }
 
 function makeCustomChannelKey(name) {
@@ -473,6 +514,8 @@ export async function getCrewOverview(userId, cityOverride) {
     joined: community.joinedClubChannels.includes(club.key),
   }));
 
+  const unread = await getUnreadSummary(user.id);
+
   return {
     city,
     arcadeTag: user.arcadeTag ?? makeArcadeTag(user),
@@ -487,14 +530,100 @@ export async function getCrewOverview(userId, cityOverride) {
     channels: [...publicChannels, ...clubChannels],
     friends: friendUsers.filter(Boolean).map(safeProfile),
     leaderboard,
+    unread,
   };
 }
 
-export async function listChannelMessages(channel, limit = 40) {
+async function fetchChannelMessagesRaw(channel, limit = 80) {
   if (typeof store.listChannelMessages === 'function') {
     return store.listChannelMessages(channel, limit);
   }
   return [];
+}
+
+async function fetchPrivateMessagesRaw(userId, friendId, limit = 80) {
+  if (typeof store.listPrivateMessages === 'function') {
+    return store.listPrivateMessages(userId, friendId, limit);
+  }
+  return [];
+}
+
+async function listAllowedChannelsForUser(user) {
+  const community = getCommunityState(user);
+  const city = normalize(user.city ?? 'Lyon') || 'Lyon';
+  const channels = new Set([
+    'france',
+    cityChannelKey(city),
+    ...community.customChannels,
+    ...community.joinedClubChannels,
+  ]);
+  return [...channels];
+}
+
+async function emitEventToUser(userId, event, payload = {}) {
+  const listeners = communitySubscribers.get(userId);
+  if (!listeners || listeners.size === 0) {
+    return;
+  }
+
+  const unread = await getUnreadSummary(userId);
+  for (const callback of listeners) {
+    try {
+      callback({
+        event,
+        data: {
+          ...payload,
+          unread,
+          emittedAt: new Date().toISOString(),
+        },
+      });
+    } catch {
+      // Ignore per-listener failures.
+    }
+  }
+}
+
+async function emitEventToUsers(userIds, event, payload = {}) {
+  const unique = [...new Set((userIds ?? []).map((id) => String(id ?? '').trim()).filter(Boolean))];
+  await Promise.all(unique.map((userId) => emitEventToUser(userId, event, payload)));
+}
+
+export async function listChannelMessagesForUser(userId, channel, options = {}) {
+  const user = await store.getUserById(userId);
+  if (!user) {
+    throw new Error('User not found');
+  }
+
+  const safeChannel = String(channel ?? '').trim();
+  if (!await isAllowedChannelForUser(user, safeChannel)) {
+    throw new Error('Canal non autorise');
+  }
+
+  const limit = clampLimit(options.limit, 40, 80);
+  const beforeMs = parseTimeMs(options.before);
+  const raw = await fetchChannelMessagesRaw(safeChannel, Math.min(220, limit * 4));
+  const filtered = raw.filter((item) => {
+    if (!beforeMs) {
+      return true;
+    }
+    return parseTimeMs(item.createdAt) < beforeMs;
+  });
+  const hasMore = filtered.length > limit;
+  const items = filtered.slice(Math.max(0, filtered.length - limit));
+  const nextCursor = hasMore && items.length > 0 ? items[0].createdAt : null;
+  if (options.markRead && items.length > 0) {
+    await markChannelRead(userId, safeChannel, new Date().toISOString());
+  }
+  return {
+    items,
+    nextCursor,
+    hasMore,
+  };
+}
+
+export async function listChannelMessages(channel, limit = 40) {
+  const out = await fetchChannelMessagesRaw(channel, limit);
+  return out;
 }
 
 export async function postChannelMessage({ userId, channel, text }) {
@@ -524,6 +653,19 @@ export async function postChannelMessage({ userId, channel, text }) {
   if (typeof store.addChannelMessage === 'function') {
     await store.addChannelMessage(item);
   }
+
+  const users = await store.listUsers();
+  const recipients = [];
+  for (const candidate of users) {
+    if (await isAllowedChannelForUser(candidate, channel)) {
+      recipients.push(candidate.id);
+    }
+  }
+
+  await emitEventToUsers(recipients, 'channel_message', {
+    channel,
+    message: item,
+  });
   return item;
 }
 
@@ -552,10 +694,37 @@ export async function addFriend(userId, friendId) {
 }
 
 export async function listPrivateMessages(userId, friendId, limit = 60) {
-  if (typeof store.listPrivateMessages === 'function') {
-    return store.listPrivateMessages(userId, friendId, limit);
+  const out = await fetchPrivateMessagesRaw(userId, friendId, limit);
+  return out;
+}
+
+export async function listPrivateMessagesForUser(userId, friendId, options = {}) {
+  const user = await store.getUserById(userId);
+  const friend = await store.getUserById(friendId);
+  if (!user || !friend) {
+    throw new Error('Utilisateur introuvable');
   }
-  return [];
+
+  const limit = clampLimit(options.limit, 60, 100);
+  const beforeMs = parseTimeMs(options.before);
+  const raw = await fetchPrivateMessagesRaw(userId, friendId, Math.min(260, limit * 4));
+  const filtered = raw.filter((item) => {
+    if (!beforeMs) {
+      return true;
+    }
+    return parseTimeMs(item.createdAt) < beforeMs;
+  });
+  const hasMore = filtered.length > limit;
+  const items = filtered.slice(Math.max(0, filtered.length - limit));
+  const nextCursor = hasMore && items.length > 0 ? items[0].createdAt : null;
+  if (options.markRead && items.length > 0) {
+    await markPrivateRead(userId, friendId, new Date().toISOString());
+  }
+  return {
+    items,
+    nextCursor,
+    hasMore,
+  };
 }
 
 export async function postPrivateMessage({ fromUserId, toUserId, text }) {
@@ -579,5 +748,148 @@ export async function postPrivateMessage({ fromUserId, toUserId, text }) {
   if (typeof store.addPrivateMessage === 'function') {
     await store.addPrivateMessage(message);
   }
+
+  await emitEventToUsers([fromUserId, toUserId], 'dm_message', {
+    participants: [fromUserId, toUserId],
+    message,
+  });
   return message;
+}
+
+export async function markChannelRead(userId, channel, readAt = new Date().toISOString()) {
+  const user = await store.getUserById(userId);
+  if (!user) {
+    throw new Error('User not found');
+  }
+  if (!await isAllowedChannelForUser(user, channel)) {
+    throw new Error('Canal non autorise');
+  }
+
+  const community = getCommunityState(user);
+  const markers = makeReadMarkers(community.readMarkers);
+  markers.channels[channel] = readAt;
+  await writeCommunityState(user.id, {
+    ...community,
+    readMarkers: markers,
+  });
+
+  await emitEventToUser(user.id, 'unread_update', {
+    scope: 'channel',
+    channel,
+    readAt,
+  });
+  return { ok: true, channel, readAt };
+}
+
+export async function markPrivateRead(userId, friendId, readAt = new Date().toISOString()) {
+  const user = await store.getUserById(userId);
+  const friend = await store.getUserById(friendId);
+  if (!user || !friend) {
+    throw new Error('Utilisateur introuvable');
+  }
+
+  const community = getCommunityState(user);
+  const markers = makeReadMarkers(community.readMarkers);
+  const dmKey = stablePairKey(userId, friendId);
+  markers.dms[dmKey] = readAt;
+  await writeCommunityState(user.id, {
+    ...community,
+    readMarkers: markers,
+  });
+
+  await emitEventToUser(user.id, 'unread_update', {
+    scope: 'dm',
+    friendId,
+    readAt,
+  });
+  return { ok: true, friendId, readAt };
+}
+
+export async function getUnreadSummary(userId) {
+  const user = await store.getUserById(userId);
+  if (!user) {
+    throw new Error('User not found');
+  }
+
+  const community = getCommunityState(user);
+  const markers = makeReadMarkers(community.readMarkers);
+  const channels = await listAllowedChannelsForUser(user);
+  const channelUnread = {};
+  let channelTotal = 0;
+
+  for (const channel of channels) {
+    const readAtMs = parseTimeMs(markers.channels[channel]);
+    const messages = await fetchChannelMessagesRaw(channel, 120);
+    const count = messages.filter((item) =>
+      item.senderId !== user.id
+      && parseTimeMs(item.createdAt) > readAtMs
+    ).length;
+    channelUnread[channel] = count;
+    channelTotal += count;
+  }
+
+  const friends = user.friends ?? [];
+  const dmUnread = {};
+  let dmTotal = 0;
+
+  for (const friendId of friends) {
+    const dmKey = stablePairKey(user.id, friendId);
+    const readAtMs = parseTimeMs(markers.dms[dmKey]);
+    const messages = await fetchPrivateMessagesRaw(user.id, friendId, 120);
+    const count = messages.filter((item) =>
+      item.toUserId === user.id
+      && parseTimeMs(item.createdAt) > readAtMs
+    ).length;
+    dmUnread[friendId] = count;
+    dmTotal += count;
+  }
+
+  return {
+    totalUnread: channelTotal + dmTotal,
+    channels: channelUnread,
+    dms: dmUnread,
+  };
+}
+
+export function subscribeCommunityFeed({ userId, onEvent }) {
+  const actor = String(userId ?? '').trim();
+  if (!actor) {
+    throw new Error('userId requis');
+  }
+  if (typeof onEvent !== 'function') {
+    throw new Error('onEvent callback requis');
+  }
+
+  const listeners = communitySubscribers.get(actor) ?? new Set();
+  listeners.add(onEvent);
+  communitySubscribers.set(actor, listeners);
+
+  getUnreadSummary(actor)
+    .then((unread) => {
+      onEvent({
+        event: 'snapshot',
+        data: {
+          unread,
+          connectedAt: new Date().toISOString(),
+        },
+      });
+    })
+    .catch(() => {});
+
+  return () => {
+    const current = communitySubscribers.get(actor);
+    if (!current) {
+      return;
+    }
+    current.delete(onEvent);
+    if (current.size === 0) {
+      communitySubscribers.delete(actor);
+      return;
+    }
+    communitySubscribers.set(actor, current);
+  };
+}
+
+export function resetCommunityRealtimeForTests() {
+  communitySubscribers.clear();
 }

@@ -24,6 +24,7 @@ import {
 import {
   addFriend,
   createCustomChannel,
+  getUnreadSummary,
   getCrewOverview,
   getBalancedProposals,
   getCityLeaderboard,
@@ -31,12 +32,15 @@ import {
   findPlayerByArcadeTag,
   connectByArcadeTag,
   joinClubByCode,
-  listChannelMessages,
-  listPrivateMessages,
+  listChannelMessagesForUser,
+  listPrivateMessagesForUser,
+  markChannelRead,
+  markPrivateRead,
   postChannelMessage,
   postPrivateMessage,
   refreshCityLeaderboard,
   searchPlayers,
+  subscribeCommunityFeed,
 } from './services/communityService.js';
 import {
   evaluateBadges,
@@ -403,6 +407,38 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, await getCrewOverview(me.id, city));
     }
 
+    if (req.method === 'GET' && url.pathname === '/api/v1/community/unread') {
+      const me = await requireAuth(req);
+      return json(res, 200, await getUnreadSummary(me.id));
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/v1/community/live') {
+      const me = await requireAuth(req);
+
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      });
+
+      const unsubscribe = subscribeCommunityFeed({
+        userId: me.id,
+        onEvent: ({ event, data }) => writeSseEvent(res, event, data),
+      });
+
+      const heartbeat = setInterval(() => {
+        res.write(': heartbeat\n\n');
+      }, 20_000);
+
+      req.on('close', () => {
+        clearInterval(heartbeat);
+        unsubscribe();
+        res.end();
+      });
+      return undefined;
+    }
+
     if (req.method === 'POST' && url.pathname === '/api/v1/community/friends') {
       const me = await requireAuth(req);
       const payload = await readJson(req);
@@ -425,7 +461,13 @@ const server = http.createServer(async (req, res) => {
       const params = pathMatch(url.pathname, '/api/v1/community/messages/:friendId');
       if (req.method === 'GET' && params) {
         const me = await requireAuth(req);
-        return json(res, 200, await listPrivateMessages(me.id, decodeURIComponent(params.friendId)));
+        const friendId = decodeURIComponent(params.friendId);
+        const out = await listPrivateMessagesForUser(me.id, friendId, {
+          limit: maybeNumber(url.searchParams.get('limit')),
+          before: url.searchParams.get('before') ?? undefined,
+          markRead: url.searchParams.get('markRead') === '1',
+        });
+        return json(res, 200, out);
       }
       if (req.method === 'POST' && params) {
         const me = await requireAuth(req);
@@ -439,10 +481,28 @@ const server = http.createServer(async (req, res) => {
     }
 
     {
+      const params = pathMatch(url.pathname, '/api/v1/community/messages/:friendId/read');
+      if (req.method === 'POST' && params) {
+        const me = await requireAuth(req);
+        const payload = await readJson(req);
+        return json(res, 200, await markPrivateRead(
+          me.id,
+          decodeURIComponent(params.friendId),
+          payload.readAt ?? new Date().toISOString(),
+        ));
+      }
+    }
+
+    {
       const params = pathMatch(url.pathname, '/api/v1/community/channels/:channel/messages');
       if (req.method === 'GET' && params) {
-        await requireAuth(req);
-        return json(res, 200, await listChannelMessages(decodeURIComponent(params.channel)));
+        const me = await requireAuth(req);
+        const out = await listChannelMessagesForUser(me.id, decodeURIComponent(params.channel), {
+          limit: maybeNumber(url.searchParams.get('limit')),
+          before: url.searchParams.get('before') ?? undefined,
+          markRead: url.searchParams.get('markRead') === '1',
+        });
+        return json(res, 200, out);
       }
       if (req.method === 'POST' && params) {
         const me = await requireAuth(req);
@@ -452,6 +512,19 @@ const server = http.createServer(async (req, res) => {
           channel: decodeURIComponent(params.channel),
           text: payload.text,
         }));
+      }
+    }
+
+    {
+      const params = pathMatch(url.pathname, '/api/v1/community/channels/:channel/read');
+      if (req.method === 'POST' && params) {
+        const me = await requireAuth(req);
+        const payload = await readJson(req);
+        return json(res, 200, await markChannelRead(
+          me.id,
+          decodeURIComponent(params.channel),
+          payload.readAt ?? new Date().toISOString(),
+        ));
       }
     }
 

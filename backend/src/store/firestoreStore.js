@@ -103,6 +103,10 @@ export class FirestoreStore {
       community: {
         customChannels: [],
         joinedClubChannels: [],
+        readMarkers: {
+          channels: {},
+          dms: {},
+        },
       },
       friends: [],
       calibration: {

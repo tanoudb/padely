@@ -52,6 +52,18 @@ async function request(path, { method = 'GET', body, token } = {}) {
   return payload;
 }
 
+function toQuery(params = {}) {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === '') {
+      return;
+    }
+    search.set(key, String(value));
+  });
+  const qs = search.toString();
+  return qs ? `?${qs}` : '';
+}
+
 export const api = {
   register: (body) => request('/api/v1/auth/register', { method: 'POST', body }),
   login: (body) => request('/api/v1/auth/login', { method: 'POST', body }),
@@ -85,14 +97,29 @@ export const api = {
   leaderboardByPeriod: (token, city, period) => request(`/api/v1/community/leaderboard?city=${encodeURIComponent(city)}&period=${encodeURIComponent(period)}`, { token }),
   leaderboardPeriods: (token, city) => request(`/api/v1/community/leaderboard/periods?city=${encodeURIComponent(city)}`, { token }),
   crew: (token, city) => request(`/api/v1/community/crew${city ? `?city=${encodeURIComponent(city)}` : ''}`, { token }),
+  communityUnread: (token) => request('/api/v1/community/unread', { token }),
   addFriend: (token, friendId) => request('/api/v1/community/friends', { method: 'POST', token, body: { friendId } }),
   arcadeSearch: (token, tag) => request(`/api/v1/community/arcade/search?tag=${encodeURIComponent(tag)}`, { token }),
   arcadeConnect: (token, tag) => request('/api/v1/community/arcade/connect', { method: 'POST', token, body: { tag } }),
   createChannel: (token, name) => request('/api/v1/community/channels', { method: 'POST', token, body: { name } }),
   joinClubByCode: (token, code) => request('/api/v1/community/clubs/join', { method: 'POST', token, body: { code } }),
-  channelMessages: (token, channel) => request(`/api/v1/community/channels/${encodeURIComponent(channel)}/messages`, { token }),
+  channelMessages: async (token, channel, options = {}) => {
+    const out = await request(`/api/v1/community/channels/${encodeURIComponent(channel)}/messages${toQuery(options)}`, { token });
+    return out.items ?? [];
+  },
+  channelMessagesPage: (token, channel, options = {}) =>
+    request(`/api/v1/community/channels/${encodeURIComponent(channel)}/messages${toQuery(options)}`, { token }),
+  markChannelRead: (token, channel, readAt) =>
+    request(`/api/v1/community/channels/${encodeURIComponent(channel)}/read`, { method: 'POST', token, body: { readAt } }),
   sendChannelMessage: (token, channel, text) => request(`/api/v1/community/channels/${encodeURIComponent(channel)}/messages`, { method: 'POST', token, body: { text } }),
-  privateMessages: (token, friendId) => request(`/api/v1/community/messages/${encodeURIComponent(friendId)}`, { token }),
+  privateMessages: async (token, friendId, options = {}) => {
+    const out = await request(`/api/v1/community/messages/${encodeURIComponent(friendId)}${toQuery(options)}`, { token });
+    return out.items ?? [];
+  },
+  privateMessagesPage: (token, friendId, options = {}) =>
+    request(`/api/v1/community/messages/${encodeURIComponent(friendId)}${toQuery(options)}`, { token }),
+  markPrivateRead: (token, friendId, readAt) =>
+    request(`/api/v1/community/messages/${encodeURIComponent(friendId)}/read`, { method: 'POST', token, body: { readAt } }),
   sendPrivateMessage: (token, friendId, text) => request(`/api/v1/community/messages/${encodeURIComponent(friendId)}`, { method: 'POST', token, body: { text } }),
   dashboard: (token, userId) => request(`/api/v1/stats/dashboard/${userId}`, { token }),
   duoStats: (token, userId) => request(`/api/v1/stats/duo/${userId}`, { token }),

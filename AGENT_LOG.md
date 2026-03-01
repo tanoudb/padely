@@ -112,3 +112,17 @@ Tests: `backend/test/requestValidation.test.js` couvre validation payloads et ra
 ✅
 ### Prochaine mission recommandée
 SYSTÈME DE COMMUNICATION TEMPS RÉEL
+
+## [2026-03-02] — Run #06
+### Mission
+SYSTÈME DE COMMUNICATION TEMPS RÉEL
+### Résultat
+La communauté Padely est maintenant réellement temps réel: les DM et messages de canaux arrivent instantanément sans refresh grâce à un flux SSE dédié.
+Les conversations et canaux supportent la pagination, le marquage lu persistant, et l’onglet Communauté affiche un badge non-lu basé sur de vraies données serveur.
+### Technique
+Backend: `backend/src/services/communityService.js` (SSE user feed, unread summary, read markers, pagination DM/canaux), `backend/src/server.js` (GET `/api/v1/community/live`, GET `/api/v1/community/unread`, pagination query params, POST read endpoints), `backend/src/store/memoryStore.js` + `backend/src/store/sqliteStore.js` + `backend/src/store/firestoreStore.js` (community read markers), nouveau test `backend/test/communityRealtime.test.js`.
+Mobile: `mobile/src/utils/communityStream.js` (SSE + fallback polling 10s), `mobile/src/api/client.js` (endpoints unread/read/pagination), `mobile/src/screens/CommunityScreen.js` (sync live DM/canaux, load more, markRead), `mobile/src/App.js` (badge Community branché sur unread serveur), `mobile/src/i18n/dictionaries.js` (label load more).
+### Statut
+✅
+### Prochaine mission recommandée
+STATS AVANCÉES

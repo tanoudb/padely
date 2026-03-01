@@ -94,6 +94,10 @@ export class MemoryStore {
       community: {
         customChannels: [],
         joinedClubChannels: [],
+        readMarkers: {
+          channels: {},
+          dms: {},
+        },
       },
       friends: [],
       calibration: {
