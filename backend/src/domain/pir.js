@@ -109,6 +109,78 @@ export function computePairDelta({
   return round(kFactor * (actual - expected), 2);
 }
 
+export function computeStreakMultiplier({
+  currentWinStreak = 0,
+  didWin = false,
+}) {
+  if (!didWin) {
+    return 1;
+  }
+
+  const streakAfterMatch = Number(currentWinStreak ?? 0) + 1;
+  if (streakAfterMatch >= 5) {
+    return 1.2;
+  }
+  if (streakAfterMatch >= 3) {
+    return 1.1;
+  }
+  return 1;
+}
+
+export function computeFormIndex(history = [], windowSize = 10) {
+  const recent = Array.isArray(history) ? history.slice(-windowSize) : [];
+  if (!recent.length) {
+    return 0;
+  }
+
+  let weighted = 0;
+  let weightSum = 0;
+
+  for (let i = 0; i < recent.length; i += 1) {
+    const item = recent[i] ?? {};
+    const didWin = typeof item.didWin === 'boolean'
+      ? item.didWin
+      : Number(item.delta ?? 0) > 0;
+    const resultScore = didWin ? 1 : -1;
+    const confidence = clamp(Math.abs(Number(item.delta ?? 0)) / 24, 0.35, 1);
+    const recencyWeight = i + 1;
+    const weight = recencyWeight * confidence;
+    weighted += resultScore * weight;
+    weightSum += weight;
+  }
+
+  if (weightSum <= 0) {
+    return 0;
+  }
+
+  return round(clamp(weighted / weightSum, -1, 1), 3);
+}
+
+export function computeMomentumFactor({
+  formIndex = 0,
+  didWin = false,
+}) {
+  const form = clamp(Number(formIndex) || 0, -1, 1);
+  const swing = form * 0.08;
+  const factor = didWin ? (1 + swing) : (1 - swing);
+  return round(clamp(factor, 0.9, 1.1), 3);
+}
+
+export function computeCalibrationKFactor({
+  matchesPlayed = 0,
+  minK = 24,
+  maxK = 40,
+  calibrationMatches = 10,
+}) {
+  const played = Math.max(0, Number(matchesPlayed) || 0);
+  if (played >= calibrationMatches) {
+    return minK;
+  }
+  const progress = played / calibrationMatches;
+  const next = maxK - ((maxK - minK) * progress);
+  return round(clamp(next, minK, maxK), 2);
+}
+
 export function softReset(rating, baseline = DEFAULT_BASELINE_RATING, compression = 0.15) {
   const adjusted = baseline + (rating - baseline) * (1 - compression);
   return round(adjusted, 2);

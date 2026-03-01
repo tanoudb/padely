@@ -106,7 +106,8 @@ export class FirestoreStore {
       },
       friends: [],
       calibration: {
-        remainingMatches: 5,
+        matchesPlayed: 0,
+        remainingMatches: 10,
       },
       history: [],
       watch: {

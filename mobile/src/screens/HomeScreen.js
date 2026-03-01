@@ -9,6 +9,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { api } from '../api/client';
 import { Card } from '../components/Card';
@@ -63,7 +64,8 @@ function countStreakDays(matches) {
   return streak;
 }
 
-export function HomeScreen({ onNavigate }) {
+export function HomeScreen() {
+  const navigation = useNavigation();
   const { token, user, logout, updateSettings } = useSession();
   const { mode, setMode, palette } = useUi();
   const { language, setLanguage, t } = useI18n();
@@ -87,6 +89,14 @@ export function HomeScreen({ onNavigate }) {
   const [appearanceMode, setAppearanceMode] = useState(user.settings?.appearanceMode ?? mode);
   const [languageChoice, setLanguageChoice] = useState(user.settings?.language ?? language);
   const [saveFeedback, setSaveFeedback] = useState('');
+
+  function goPlaySetup() {
+    navigation.getParent()?.navigate('PlayTab', { screen: 'PlaySetup' });
+  }
+
+  function goCommunity() {
+    navigation.getParent()?.navigate('CommunityTab', { screen: 'CommunityMain' });
+  }
 
   const loadHome = useCallback(async () => {
     const [dash, periods, matchesOut] = await Promise.all([
@@ -227,7 +237,7 @@ export function HomeScreen({ onNavigate }) {
             <Pressable style={[styles.quickBtnPrimary, { backgroundColor: palette.accent }]} onPress={() => onNavigate?.('play')}>
               <Text style={styles.quickBtnPrimaryText}>{t('home.launchRanked')}</Text>
             </Pressable>
-            <Pressable style={[styles.quickBtnGhost, { borderColor: palette.line, backgroundColor: palette.chip }]} onPress={() => onNavigate?.('crew')}>
+            <Pressable style={[styles.quickBtnGhost, { borderColor: palette.line, backgroundColor: palette.chip }]} onPress={goCommunity}>
               <Text style={[styles.quickBtnGhostText, { color: palette.text }]}>{t('home.launchFind')}</Text>
             </Pressable>
           </View>

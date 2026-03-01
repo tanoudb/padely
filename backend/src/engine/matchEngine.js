@@ -1,12 +1,15 @@
 import {
   winProbability,
+  computeCalibrationKFactor,
   computeClutchBonus,
   computeCombativiteBonus,
   computeDominationMultiplier,
   computeLeadershipBonus,
   computeLossProtection,
+  computeMomentumFactor,
   computePairDelta,
   computePillars,
+  computeStreakMultiplier,
   computeUpsetBonus,
 } from '../domain/pir.js';
 import { round } from '../domain/math.js';
@@ -72,9 +75,22 @@ export function evaluateMatch(payload) {
     teamUnderdog,
     clutchTeamBonus,
   }) => {
-    const baseK = player.kFactor ?? 24;
+    const baseK = computeCalibrationKFactor({
+      matchesPlayed: player.calibration?.matchesPlayed ?? 0,
+      minK: 24,
+      maxK: player.kFactor ?? 40,
+      calibrationMatches: 10,
+    });
     const actual = didTeamWin ? 1 : 0;
-    const baseDelta = baseK * domination * (actual - expected);
+    const streakMultiplier = computeStreakMultiplier({
+      currentWinStreak: player.form?.currentWinStreak ?? 0,
+      didWin: didTeamWin,
+    });
+    const momentumFactor = computeMomentumFactor({
+      formIndex: player.form?.formIndex ?? 0,
+      didWin: didTeamWin,
+    });
+    const baseDelta = baseK * domination * streakMultiplier * momentumFactor * (actual - expected);
     const clutchDelta = didTeamWin ? clutchTeamBonus : 0;
     const leadershipDelta = computeLeadershipBonus(player.rating, partner.rating, didTeamWin);
     const upsetDelta = computeUpsetBonus({
@@ -130,7 +146,12 @@ export function evaluateMatch(payload) {
       delta: totalDelta,
       breakdown: {
         base: round(baseDelta, 2),
+        baseK,
         dominationMultiplier: domination,
+        streakMultiplier,
+        momentumFactor,
+        formIndex: round(player.form?.formIndex ?? 0, 3),
+        preMatchWinStreak: player.form?.currentWinStreak ?? 0,
         clutch: clutchDelta,
         leadership: leadershipDelta,
         upset: upsetDelta,

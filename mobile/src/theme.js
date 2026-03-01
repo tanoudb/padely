@@ -1,23 +1,25 @@
 import { Platform } from 'react-native';
 
-const iosDisplay = 'AvenirNextCondensed-Heavy';
-const iosTitle = 'AvenirNext-DemiBold';
-const iosBody = 'AvenirNext-Regular';
+const iosDisplay = 'DMSans-Bold';
+const iosTitle = 'DMSans-Medium';
+const iosBody = 'DMSans-Regular';
 
 export const theme = {
   colors: {
-    bg: '#06131C',
-    bgAlt: '#0B2231',
-    card: '#102B3C',
-    cardStrong: '#163A50',
-    text: '#F1F6FA',
-    muted: '#9DB9CB',
-    accent: '#F4D35E',
-    accent2: '#00D1B2',
-    danger: '#FF6B6B',
-    warning: '#FFAD5A',
-    line: '#295169',
-    chip: '#0E2A3D',
+    bg: '#09090B',
+    bgAlt: '#18181B',
+    bgElevated: '#27272A',
+    card: '#18181B',
+    cardStrong: '#27272A',
+    text: '#FAFAFA',
+    textSecondary: '#A1A1AA',
+    muted: '#71717A',
+    accent: '#D4A853',
+    accent2: '#10B981',
+    danger: '#EF4444',
+    warning: '#F59E0B',
+    line: 'rgba(255, 255, 255, 0.06)',
+    chip: '#232326',
   },
   spacing: {
     xs: 6,
@@ -32,9 +34,9 @@ export const theme = {
     lg: 22,
   },
   fonts: {
-    display: Platform.select({ ios: iosDisplay, android: 'sans-serif-condensed' }),
-    title: Platform.select({ ios: iosTitle, android: 'sans-serif-medium' }),
-    body: Platform.select({ ios: iosBody, android: 'sans-serif' }),
+    display: Platform.select({ ios: iosDisplay, android: 'DMSans-Bold' }),
+    title: Platform.select({ ios: iosTitle, android: 'DMSans-Medium' }),
+    body: Platform.select({ ios: iosBody, android: 'DMSans-Regular' }),
     mono: Platform.select({ ios: 'Menlo', android: 'monospace' }),
   },
 };

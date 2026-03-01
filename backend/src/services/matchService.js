@@ -1,4 +1,5 @@
 import { evaluateMatch } from '../engine/matchEngine.js';
+import { computeFormIndex } from '../domain/pir.js';
 import { store } from '../store/index.js';
 import { newToken } from '../utils/security.js';
 import { newId } from '../utils/id.js';
@@ -124,6 +125,25 @@ function slotWatch(slot, watchByPlayer) {
   return sanitizeWatchMetrics(watchByPlayer[key] ?? {});
 }
 
+function computeWinStreak(history = []) {
+  if (!Array.isArray(history) || history.length === 0) {
+    return 0;
+  }
+
+  let streak = 0;
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const entry = history[index] ?? {};
+    const didWin = typeof entry.didWin === 'boolean'
+      ? entry.didWin
+      : Number(entry.delta ?? 0) > 0;
+    if (!didWin) {
+      break;
+    }
+    streak += 1;
+  }
+  return streak;
+}
+
 function participantsForMatch(match, teamKey) {
   const fromParticipants = match.participants?.[teamKey];
   if (Array.isArray(fromParticipants) && fromParticipants.length === 2) {
@@ -163,7 +183,12 @@ function createEnginePlayer(slot, watch, usersById, partnerSlot, pairRating) {
   }
 
   const user = usersById.get(slot.userId);
-  const remaining = user.calibration?.remainingMatches ?? 0;
+  const legacyRemaining = Number(user.calibration?.remainingMatches);
+  const inferredFromLegacy = Number.isFinite(legacyRemaining)
+    ? Math.max(0, 10 - Math.max(0, legacyRemaining))
+    : 0;
+  const matchesPlayed = Number(user.calibration?.matchesPlayed ?? inferredFromLegacy) || 0;
+  const history = user.history ?? [];
   const partnerRating = partnerSlot.kind === 'user'
     ? usersById.get(partnerSlot.userId).rating
     : partnerSlot.guestRating;
@@ -172,7 +197,14 @@ function createEnginePlayer(slot, watch, usersById, partnerSlot, pairRating) {
     id: user.id,
     rating: user.rating,
     pairRating: pairRating ?? ((user.rating + partnerRating) / 2),
-    kFactor: remaining > 0 ? 40 : 24,
+    kFactor: 40,
+    calibration: {
+      matchesPlayed,
+    },
+    form: {
+      currentWinStreak: computeWinStreak(history),
+      formIndex: computeFormIndex(history, 10),
+    },
     watch,
     winners: 0,
     directErrors: 0,
@@ -341,7 +373,10 @@ function buildPirImpact(match, userId) {
 
   const reasons = [
     `Base: ${toSigned(update.breakdown?.base)}`,
+    `K calibration: ${Number(update.breakdown?.baseK ?? 24).toFixed(2)}`,
     `Domination: x${Number(update.breakdown?.dominationMultiplier ?? 1).toFixed(2)}`,
+    `Streak: x${Number(update.breakdown?.streakMultiplier ?? 1).toFixed(2)}`,
+    `Momentum: x${Number(update.breakdown?.momentumFactor ?? 1).toFixed(2)}`,
     `Clutch: ${toSigned(update.breakdown?.clutch)}`,
     `Combativite: ${toSigned(update.breakdown?.combativite)}`,
     `Upset: ${toSigned(update.breakdown?.upset)}`,
@@ -567,20 +602,26 @@ export async function rateValidatedMatch(matchId) {
       continue;
     }
 
-    const remainingCalibration = current.calibration?.remainingMatches ?? 0;
+    const winner = result.summary?.winner;
+    const side = result.teamA.some((p) => p.id === update.id) ? 'A' : 'B';
+    const didWin = side === winner;
+    const previousHistory = current.history ?? [];
+    const nextMatchesPlayed = Math.max(0, (Number(current.calibration?.matchesPlayed ?? 0) || 0) + 1);
     await store.updateUser(update.id, {
       rating: update.newRating,
       pir: update.pir.pir,
       calibration: {
-        remainingMatches: Math.max(0, remainingCalibration - 1),
+        matchesPlayed: nextMatchesPlayed,
+        remainingMatches: Math.max(0, 10 - nextMatchesPlayed),
       },
       history: [
-        ...(current.history ?? []),
+        ...previousHistory,
         {
           at: new Date().toISOString(),
           rating: update.newRating,
           delta: update.delta,
           pir: update.pir.pir,
+          didWin,
           matchId,
         },
       ].slice(-60),

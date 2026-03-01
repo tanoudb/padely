@@ -6,7 +6,7 @@
     "scheme": "padely",
     "icon": "./assets/icon.png",
     "orientation": "all",
-    "userInterfaceStyle": "dark",
+    "userInterfaceStyle": "automatic",
     "jsEngine": "hermes",
     "plugins": [
       [
@@ -19,6 +19,16 @@
         "expo-camera",
         {
           "cameraPermission": "Padely utilise la camera pour scanner les QR joueurs et clubs."
+        }
+      ],
+      [
+        "expo-font",
+        {
+          "fonts": [
+            "./assets/fonts/DMSans-Regular.ttf",
+            "./assets/fonts/DMSans-Medium.ttf",
+            "./assets/fonts/DMSans-Bold.ttf"
+          ]
         }
       ],
       "expo-notifications"

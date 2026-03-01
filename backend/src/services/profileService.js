@@ -90,7 +90,8 @@ export async function completeOnboarding(userId, payload) {
       completedAt: new Date().toISOString(),
     },
     calibration: {
-      remainingMatches: 5,
+      matchesPlayed: 0,
+      remainingMatches: 10,
     },
     history: [],
   });

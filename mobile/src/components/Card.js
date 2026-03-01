@@ -9,10 +9,13 @@ export function Card({ children, style, elevated = false }) {
       style={[
         styles.card,
         {
-          backgroundColor: elevated ? palette.cardStrong : palette.card,
-          borderColor: palette.line,
+          backgroundColor: elevated ? (palette.bgElevated ?? palette.cardStrong) : palette.card,
+          shadowColor: '#000',
+          shadowOpacity: elevated ? (palette.key === 'night' ? 0.3 : 0.06) : 0,
+          shadowRadius: elevated ? 20 : 0,
+          shadowOffset: { width: 0, height: elevated ? 4 : 0 },
+          elevation: elevated ? 4 : 0,
         },
-        elevated && styles.elevated,
         style,
       ]}
     >
@@ -23,15 +26,7 @@ export function Card({ children, style, elevated = false }) {
 
 const styles = StyleSheet.create({
   card: {
-    borderRadius: 22,
-    padding: 16,
-    borderWidth: 1,
-  },
-  elevated: {
-    shadowColor: '#000000',
-    shadowOpacity: 0.28,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 8,
+    borderRadius: 20,
+    padding: 20,
   },
 });

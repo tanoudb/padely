@@ -65,6 +65,7 @@ export async function seedDemoData() {
         quizAnswers: null,
       },
       calibration: {
+        matchesPlayed: 10,
         remainingMatches: 0,
       },
     });
