@@ -7,6 +7,7 @@ import {
   Pressable,
   SafeAreaView,
   ScrollView,
+  Share,
   StyleSheet,
   Switch,
   Text,
@@ -16,6 +17,8 @@ import {
 } from 'react-native';
 import { api } from '../api/client';
 import { Card } from '../components/Card';
+import { QrScannerModal } from '../components/QrScannerModal';
+import { useI18n } from '../state/i18n';
 import { useSession } from '../state/session';
 import { theme } from '../theme';
 import {
@@ -39,6 +42,8 @@ function scoreConfigFromPreferences(settings = {}) {
     return {
       puntoDeOro,
       setsToWin: 2,
+      gamesToWinSet: 6,
+      tieBreakAtGames: 6,
       tieBreakPoints: 7,
       noTieBreakInDecidingSet: false,
       decidingSetMode: 'full_set',
@@ -50,6 +55,8 @@ function scoreConfigFromPreferences(settings = {}) {
     return {
       puntoDeOro,
       setsToWin: 2,
+      gamesToWinSet: 6,
+      tieBreakAtGames: 6,
       tieBreakPoints: 7,
       noTieBreakInDecidingSet: false,
       decidingSetMode: 'super_tiebreak',
@@ -60,33 +67,90 @@ function scoreConfigFromPreferences(settings = {}) {
   return {
     puntoDeOro,
     setsToWin: 3,
+    gamesToWinSet: 4,
+    tieBreakAtGames: 3,
     tieBreakPoints: 7,
-    noTieBreakInDecidingSet: true,
+    noTieBreakInDecidingSet: false,
     decidingSetMode: 'full_set',
     superTieBreakPoints: 10,
   };
 }
 
-function matchFormatLabel(format) {
-  if (format === 'standard') return 'Standard · 2 sets gagnants';
-  if (format === 'club') return 'Club · 3e set en super tie-break';
-  return 'Marathon · 3 sets gagnants';
+function matchFormatLabel(format, t) {
+  if (format === 'standard') return t('play.formatStandardLabel');
+  if (format === 'club') return t('play.formatClubLabel');
+  return t('play.formatMarathonLabel');
 }
 
-function MatchCard({ match, onValidate }) {
+function arcadeTagFromQrValue(raw) {
+  const value = String(raw ?? '').trim();
+  if (!value) return '';
+
+  if (value.startsWith('padely://arcade/')) {
+    return decodeURIComponent(value.slice('padely://arcade/'.length)).trim();
+  }
+
+  if (value.startsWith('PADELY_ARCADE:')) {
+    return value.slice('PADELY_ARCADE:'.length).trim();
+  }
+
+  if (value.startsWith('http://') || value.startsWith('https://')) {
+    try {
+      const url = new URL(value);
+      const qpTag = url.searchParams.get('tag');
+      if (qpTag) return qpTag.trim();
+      const chunks = url.pathname.split('/').filter(Boolean);
+      if (chunks.length >= 2 && chunks[chunks.length - 2] === 'arcade') {
+        return decodeURIComponent(chunks[chunks.length - 1]).trim();
+      }
+    } catch {
+      return value;
+    }
+  }
+
+  return value;
+}
+
+function MatchCard({ match, onValidate, onOpenPir, t }) {
   const label = match.sets.map((set) => `${set.a}-${set.b}`).join(' / ');
+  const pirDelta = Number(match?.pirImpact?.delta ?? 0);
+  const pirDeltaLabel = pirDelta > 0 ? `+${pirDelta.toFixed(2)}` : pirDelta.toFixed(2);
+  const pirReasons = (match?.pirImpact?.reasons ?? []).slice(0, 3);
   return (
     <View style={styles.matchCard}>
-      <Text style={styles.matchTitle}>Match {match.id.slice(-6)}</Text>
-      <Text style={styles.meta}>Score: {label || 'N/A'}</Text>
-      <Text style={styles.meta}>Statut: {match.status} · {match.mode === 'friendly' ? 'Amical' : 'Classe'}</Text>
+      <Text style={styles.matchTitle}>{t('play.matchLabel', { id: match.id.slice(-6) })}</Text>
+      <Text style={styles.meta}>{t('play.scoreLabel', { score: label || 'N/A' })}</Text>
+      <Text style={styles.meta}>
+        {t('play.statusLabel', {
+          status: match.status,
+          mode: match.mode === 'friendly' ? t('play.modeFriendly') : t('play.modeRanked'),
+        })}
+      </Text>
+      {match?.pirImpact ? (
+        <View style={styles.pirBox}>
+          <Text style={styles.pirTitle}>{t('play.pirImpact', { delta: pirDeltaLabel })}</Text>
+          <Text style={styles.pirMeta}>
+            {t('play.rankLine', {
+              before: Math.round(match.pirImpact.before),
+              after: Math.round(match.pirImpact.after),
+              pir: Math.round(match.pirImpact.pir ?? 0),
+            })}
+          </Text>
+          {pirReasons.map((line, index) => (
+            <Text key={`${match.id}-pir-${index}`} style={styles.pirReason}>• {line}</Text>
+          ))}
+          <Pressable style={styles.pirDetailBtn} onPress={() => onOpenPir?.(match)}>
+            <Text style={styles.pirDetailBtnText}>{t('play.explainPir')}</Text>
+          </Pressable>
+        </View>
+      ) : null}
       {match.canValidate ? (
         <View style={styles.row}>
           <Pressable style={[styles.actionBtn, styles.accept]} onPress={() => onValidate(match.id, true)}>
-            <Text style={styles.actionText}>Valider</Text>
+            <Text style={styles.actionText}>{t('play.validate')}</Text>
           </Pressable>
           <Pressable style={[styles.actionBtn, styles.reject]} onPress={() => onValidate(match.id, false)}>
-            <Text style={[styles.actionText, styles.rejectText]}>Refuser</Text>
+            <Text style={[styles.actionText, styles.rejectText]}>{t('play.reject')}</Text>
           </Pressable>
         </View>
       ) : null}
@@ -94,12 +158,12 @@ function MatchCard({ match, onValidate }) {
   );
 }
 
-function RefereeSide({ team, serving, point, games, onPress, pointSize, gameSize, titleSize }) {
+function RefereeSide({ team, serving, point, games, onPress, pointSize, gameSize, titleSize, teamLabel, gamesLabel, tapHint }) {
   const isRed = team === 'a';
   return (
     <Pressable style={[styles.refSide, isRed ? styles.redSide : styles.blueSide]} onPress={onPress}>
       <Text style={[styles.refSideTitle, { fontSize: titleSize }]}>
-        {isRed ? 'EQUIPE ROUGE' : 'EQUIPE BLEUE'} {serving ? '🎾' : ''}
+        {teamLabel} {serving ? '🎾' : ''}
       </Text>
       <Text
         style={[styles.refPoint, { fontSize: pointSize, lineHeight: Math.round(pointSize * 1.08) }]}
@@ -109,8 +173,8 @@ function RefereeSide({ team, serving, point, games, onPress, pointSize, gameSize
       >
         {point}
       </Text>
-      <Text style={[styles.refGames, { fontSize: gameSize }]}>Jeux: {games}</Text>
-      <Text style={styles.refTapHint}>Touchez pour marquer le point</Text>
+      <Text style={[styles.refGames, { fontSize: gameSize }]}>{gamesLabel}: {games}</Text>
+      <Text style={styles.refTapHint}>{tapHint}</Text>
     </Pressable>
   );
 }
@@ -122,35 +186,41 @@ function victoryTone(sets, winner) {
 
   if (gap >= 8) {
     return {
-      title: 'VICTOIRE ECRASANTE',
-      subtitle: 'Domination totale du match',
+      titleKey: 'play.victoryCrushingTitle',
+      subtitleKey: 'play.victoryCrushingSub',
       color: '#F4D35E',
     };
   }
 
   if (gap >= 4) {
     return {
-      title: 'VICTOIRE MAITRISEE',
-      subtitle: 'Match controle du debut a la fin',
+      titleKey: 'play.victoryControlledTitle',
+      subtitleKey: 'play.victoryControlledSub',
       color: '#00D1B2',
     };
   }
 
   return {
-    title: 'VICTOIRE ACCROCHEE',
-    subtitle: 'Mental solide dans les moments cles',
+    titleKey: 'play.victoryTightTitle',
+    subtitleKey: 'play.victoryTightSub',
     color: '#FFAD5A',
   };
 }
 
 export function PlayScreen() {
   const { token, user } = useSession();
+  const { t } = useI18n();
+  const matchFormat = user.settings?.matchFormat ?? 'marathon';
+  const autoSaveMatch = Boolean(user.settings?.autoSaveMatch ?? true);
+  const defaultMatchMode = user.settings?.defaultMatchMode === 'friendly' ? 'friendly' : 'ranked';
   const [players, setPlayers] = useState([]);
   const [selectedUsers, setSelectedUsers] = useState([]);
   const [guests, setGuests] = useState([]);
+  const [arcadeTagInput, setArcadeTagInput] = useState('');
+  const [qrScannerOpen, setQrScannerOpen] = useState(false);
   const [guestName, setGuestName] = useState('');
   const [guestLevel, setGuestLevel] = useState('Intermediaire');
-  const [matchMode, setMatchMode] = useState('ranked');
+  const [matchMode, setMatchMode] = useState(defaultMatchMode);
   const [totalCost, setTotalCost] = useState('48');
   const [feedback, setFeedback] = useState('');
   const [matches, setMatches] = useState([]);
@@ -161,6 +231,8 @@ export function PlayScreen() {
   const [modalOrientation, setModalOrientation] = useState('unknown');
   const [savingAuto, setSavingAuto] = useState(false);
   const [savedMatchId, setSavedMatchId] = useState(null);
+  const [savedInviteUrl, setSavedInviteUrl] = useState('');
+  const [pirDetail, setPirDetail] = useState(null);
 
   const { width, height } = useWindowDimensions();
   const landscape = width > height;
@@ -193,6 +265,37 @@ export function PlayScreen() {
   }, [score.winner, setsPayload]);
   const setsWonA = useMemo(() => score.sets.filter((set) => set.a > set.b).length, [score.sets]);
   const setsWonB = useMemo(() => score.sets.filter((set) => set.b > set.a).length, [score.sets]);
+  const estimatedWatchByPlayer = useMemo(() => {
+    const allSets = setsPayload.length ? setsPayload : scoreStateToSets(score);
+    const totalGames = allSets.reduce((sum, set) => sum + set.a + set.b, 0);
+    const intensity = Math.max(35, Math.min(95, 35 + totalGames * 3));
+    const distance = Number((0.09 * totalGames + 0.6).toFixed(2));
+    const calories = Math.round(22 * totalGames + 130);
+    const hr = Math.round(118 + totalGames * 1.6);
+    const ox = Math.max(92, Math.min(99, 97 - Math.round(totalGames / 16)));
+
+    const payload = {};
+    const userIds = [user.id, ...selectedUsers];
+    userIds.forEach((id) => {
+      payload[id] = {
+        distanceKm: distance,
+        calories,
+        intensityScore: intensity,
+        heartRateAvg: hr,
+        oxygenAvg: ox,
+      };
+    });
+    guests.forEach((g) => {
+      payload[g.id] = {
+        distanceKm: Number((distance * 0.9).toFixed(2)),
+        calories: Math.round(calories * 0.85),
+        intensityScore: Math.max(25, intensity - 10),
+        heartRateAvg: Math.max(95, hr - 12),
+        oxygenAvg: ox,
+      };
+    });
+    return payload;
+  }, [setsPayload, score, user.id, selectedUsers, guests]);
 
   async function refresh() {
     const [playersOut, myMatches] = await Promise.all([
@@ -210,8 +313,9 @@ export function PlayScreen() {
   useEffect(() => {
     const cfg = scoreConfigFromPreferences(user.settings);
     setScore(resetScore(cfg));
+    setMatchMode(defaultMatchMode);
     setAutoSideSwitch(Boolean(user.settings?.autoSideSwitch ?? true));
-  }, [user.settings]);
+  }, [user.settings, defaultMatchMode]);
 
   useEffect(() => {
     if (!score.winner) {
@@ -237,11 +341,11 @@ export function PlayScreen() {
 
   useEffect(() => {
     async function autoSave() {
-      if (!score.winner || savingAuto || savedMatchId) {
+      if (!autoSaveMatch || !score.winner || savingAuto || savedMatchId) {
         return;
       }
       if (selectedSlots.length !== 3) {
-        setFeedback('Match termine: ajoute 3 joueurs (inscrits ou invites) pour enregistrer automatiquement.');
+        setFeedback(t('play.msgNeedPlayers'));
         return;
       }
 
@@ -252,41 +356,41 @@ export function PlayScreen() {
           teamA: [user.id, teamA2],
           teamB: [teamB1, teamB2],
           sets: setsPayload,
+          matchFormat,
           mode: matchMode,
           goldenPoints: { teamA: 0, teamB: 0 },
-          validationMode: 'rapide',
+          validationMode: matchMode === 'ranked' ? 'cross' : 'friendly',
           totalCostEur: Number(totalCost),
           clubName: 'Club local',
-          watchByPlayer: {
-            [user.id]: {
-              distanceKm: 0,
-              calories: 0,
-              intensityScore: 0,
-              heartRateAvg: 0,
-              oxygenAvg: 0,
-            },
-          },
+          watchByPlayer: estimatedWatchByPlayer,
         });
 
         let inviteSuffix = '';
         try {
           const invite = await api.createMatchInvite(token, out.id);
-          inviteSuffix = invite?.url ? ' Lien invitation genere.' : '';
+          if (invite?.url) {
+            inviteSuffix = t('play.inviteSuffix');
+            setSavedInviteUrl(invite.url);
+          }
         } catch {
           inviteSuffix = '';
         }
         setSavedMatchId(out.id);
-        setFeedback(`Match ${out.id.slice(-6)} enregistre automatiquement.${inviteSuffix}`);
+        if (matchMode === 'ranked') {
+          setFeedback(t('play.msgAutoSavedRanked', { id: out.id.slice(-6), suffix: inviteSuffix }));
+        } else {
+          setFeedback(t('play.msgAutoSaved', { id: out.id.slice(-6), suffix: inviteSuffix }));
+        }
         await refresh();
       } catch (e) {
-        setFeedback(`Erreur enregistrement auto: ${e.message}`);
+        setFeedback(t('play.msgAutoSaveError', { error: e.message }));
       } finally {
         setSavingAuto(false);
       }
     }
 
     autoSave();
-  }, [score.winner, selectedSlots, setsPayload, totalCost, token, user.id, savingAuto, savedMatchId, matchMode]);
+  }, [autoSaveMatch, score.winner, selectedSlots, setsPayload, totalCost, token, user.id, savingAuto, savedMatchId, matchMode, matchFormat, estimatedWatchByPlayer]);
 
   function toggleUser(playerId) {
     setSelectedUsers((prev) => {
@@ -305,13 +409,17 @@ export function PlayScreen() {
   }
 
   function addGuest() {
+    if (matchMode === 'ranked') {
+      setFeedback(t('play.msgRankedNoGuests'));
+      return;
+    }
     const name = guestName.trim();
     if (!name) {
-      setFeedback('Entre un nom d invite.');
+      setFeedback(t('play.msgEnterGuest'));
       return;
     }
     if (selectedUsers.length + guests.length >= 3) {
-      setFeedback('Tu as deja 3 joueurs selectionnes.');
+      setFeedback(t('play.msgAlreadyThree'));
       return;
     }
 
@@ -321,18 +429,83 @@ export function PlayScreen() {
       level: guestLevel,
     }]));
     setGuestName('');
-    setFeedback('Invite ajoute.');
+    setFeedback(t('play.msgGuestAdded'));
+  }
+
+  async function addByArcadeTag(tagValue = arcadeTagInput.trim()) {
+    if (matchMode === 'ranked' && selectedUsers.length >= 3) {
+      setFeedback(t('play.msgRankedNeedThree'));
+      return false;
+    }
+    const tag = tagValue.trim();
+    if (!tag) {
+      setFeedback(t('play.msgEnterTag'));
+      return false;
+    }
+    if (selectedUsers.length + guests.length >= 3) {
+      setFeedback(t('play.msgAlreadyThree'));
+      return false;
+    }
+    try {
+      const out = await api.arcadeSearch(token, tag);
+      if (!out?.id || out.id === user.id) {
+        throw new Error(t('play.msgInvalidTag'));
+      }
+      setSelectedUsers((prev) => (prev.includes(out.id) ? prev : [...prev, out.id].slice(0, 3)));
+      setArcadeTagInput('');
+      setFeedback(t('play.msgPlayerAddedTag', { name: out.displayName }));
+      return true;
+    } catch (e) {
+      setFeedback(e.message);
+      return false;
+    }
+  }
+
+  async function onScanPlayerQr(rawValue) {
+    const tag = arcadeTagFromQrValue(rawValue);
+    if (!tag) {
+      setFeedback(t('play.msgInvalidQr'));
+      return false;
+    }
+    const ok = await addByArcadeTag(tag);
+    if (ok) {
+      setQrScannerOpen(false);
+    }
+    return ok;
+  }
+
+  function setMatchModeSafe(nextMode) {
+    setMatchMode(nextMode);
+    if (nextMode === 'ranked' && guests.length > 0) {
+      setGuests([]);
+      setFeedback(t('play.msgGuestsRemoved'));
+    }
+  }
+
+  async function shareInvite() {
+    if (!savedInviteUrl || !savedMatchId) {
+      setFeedback(t('play.msgNoShareLink'));
+      return;
+    }
+    try {
+      await Share.share({
+        message: t('play.shareInviteMessage', { url: savedInviteUrl }),
+        title: t('play.shareInviteTitle', { id: savedMatchId.slice(-6) }),
+      });
+    } catch (e) {
+      setFeedback(t('play.msgShareUnavailable', { error: e.message }));
+    }
   }
 
   async function createManual() {
     setFeedback('');
     try {
       if (selectedSlots.length !== 3) {
-        throw new Error('Selectionne 3 joueurs (inscrits ou invites)');
+        throw new Error(t('play.msgNeedSelectThree'));
       }
 
       if (setsPayload.length === 0) {
-        throw new Error('Ajoute au moins un jeu avant d enregistrer le match');
+        throw new Error(t('play.msgNeedAtLeastSet'));
       }
 
       const [teamA2, teamB1, teamB2] = selectedSlots;
@@ -340,30 +513,30 @@ export function PlayScreen() {
         teamA: [user.id, teamA2],
         teamB: [teamB1, teamB2],
         sets: setsPayload,
+        matchFormat,
         mode: matchMode,
         goldenPoints: { teamA: 0, teamB: 0 },
-        validationMode: 'rapide',
+        validationMode: matchMode === 'ranked' ? 'cross' : 'friendly',
         totalCostEur: Number(totalCost),
         clubName: 'Club local',
-        watchByPlayer: {
-          [user.id]: {
-            distanceKm: 0,
-            calories: 0,
-            intensityScore: 0,
-            heartRateAvg: 0,
-            oxygenAvg: 0,
-          },
-        },
+        watchByPlayer: estimatedWatchByPlayer,
       });
 
       let inviteSuffix = '';
       try {
         const invite = await api.createMatchInvite(token, out.id);
-        inviteSuffix = invite?.url ? ' Lien invitation genere.' : '';
+        if (invite?.url) {
+          setSavedInviteUrl(invite.url);
+          inviteSuffix = t('play.inviteSuffix');
+        }
       } catch {
         inviteSuffix = '';
       }
-      setFeedback(`Match ${out.id.slice(-6)} cree.${inviteSuffix}`);
+      if (matchMode === 'ranked') {
+        setFeedback(t('play.msgCreatedRanked', { id: out.id.slice(-6), suffix: inviteSuffix }));
+      } else {
+        setFeedback(t('play.msgCreated', { id: out.id.slice(-6), suffix: inviteSuffix }));
+      }
       setSavedMatchId(out.id);
       await refresh();
     } catch (e) {
@@ -375,7 +548,7 @@ export function PlayScreen() {
     setFeedback('');
     try {
       await api.validateMatch(token, matchId, accepted);
-      setFeedback(accepted ? 'Score valide.' : 'Score refuse.');
+      setFeedback(accepted ? t('play.msgScoreValid') : t('play.msgScoreRejected'));
       await refresh();
     } catch (e) {
       setFeedback(e.message);
@@ -385,8 +558,9 @@ export function PlayScreen() {
   function closeVictory() {
     setScore(resetScore(score.config));
     setSavedMatchId(null);
+    setSavedInviteUrl('');
     setFullScreenMode(false);
-    setFeedback('Nouveau match pret.');
+    setFeedback(t('play.msgNewMatchReady'));
   }
 
   const orientationIsLandscape = modalOrientation.includes('LANDSCAPE') || modalOrientation.includes('landscape');
@@ -409,13 +583,59 @@ export function PlayScreen() {
     <>
       <ScrollView style={styles.root} contentContainerStyle={styles.content}>
         <View style={styles.header}>
-          <Text style={styles.eyebrow}>TABLEAU DE SCORE</Text>
-          <Text style={styles.h1}>Match en direct</Text>
+          <Text style={styles.eyebrow}>{t('play.boardKicker')}</Text>
+          <Text style={styles.h1}>{t('play.boardTitle')}</Text>
+          <Text style={styles.headerSub}>{t('play.boardPitch')}</Text>
         </View>
 
         <Card elevated>
-          <Text style={styles.sectionTitle}>1) Joueurs (inscrits + invites)</Text>
-          <Text style={styles.meta}>Ordre: 1er selectionne = ton partenaire rouge, puis equipe bleue.</Text>
+          <Text style={styles.sectionTitle}>{t('play.matchMode')}</Text>
+          <View style={styles.row}>
+            <Pressable
+              style={[styles.modeBtn, matchMode === 'friendly' && styles.modeBtnActiveFriendly]}
+              onPress={() => setMatchModeSafe('friendly')}
+            >
+              <Text style={[styles.modeBtnTitle, matchMode === 'friendly' && styles.modeBtnTitleActive]}>{t('play.modeFriendly')}</Text>
+              <Text style={[styles.modeBtnSub, matchMode === 'friendly' && styles.modeBtnSubActive]}>
+                {t('play.modeFriendlySub')}
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[styles.modeBtn, matchMode === 'ranked' && styles.modeBtnActiveRanked]}
+              onPress={() => setMatchModeSafe('ranked')}
+            >
+              <Text style={[styles.modeBtnTitle, matchMode === 'ranked' && styles.modeBtnTitleActive]}>{t('play.modeRanked')}</Text>
+              <Text style={[styles.modeBtnSub, matchMode === 'ranked' && styles.modeBtnSubActive]}>
+                {t('play.modeRankedSub')}
+              </Text>
+            </Pressable>
+          </View>
+          <Text style={styles.meta}>
+            {matchMode === 'ranked'
+              ? t('play.impactRanked')
+              : t('play.impactFriendly')}
+          </Text>
+        </Card>
+
+        <Card elevated>
+          <Text style={styles.sectionTitle}>{t('play.playersTitle')}</Text>
+          <Text style={styles.meta}>{t('play.playersOrder')}</Text>
+          <View style={styles.row}>
+            <TextInput
+              style={[styles.input, styles.rowTagInput]}
+              placeholder={t('play.arcadePlaceholder')}
+              placeholderTextColor={theme.colors.muted}
+              autoCapitalize="characters"
+              value={arcadeTagInput}
+              onChangeText={setArcadeTagInput}
+            />
+            <Pressable style={styles.tagBtnGhost} onPress={() => setQrScannerOpen(true)}>
+              <Text style={styles.tagBtnGhostText}>{t('play.scanQr')}</Text>
+            </Pressable>
+            <Pressable style={styles.tagBtn} onPress={addByArcadeTag}>
+              <Text style={styles.tagBtnText}>{t('play.addTag')}</Text>
+            </Pressable>
+          </View>
           <View style={styles.wrap}>
             {selectablePlayers.map((p) => {
               const active = selectedUsers.includes(p.id);
@@ -431,29 +651,37 @@ export function PlayScreen() {
             })}
           </View>
 
-          <View style={styles.rowWrap}>
-            <TextInput
-              style={[styles.input, styles.guestInput]}
-              placeholder="Nom invite"
-              placeholderTextColor={theme.colors.muted}
-              value={guestName}
-              onChangeText={setGuestName}
-            />
-            <View style={styles.guestLevels}>
-              {['Debutant', 'Intermediaire', 'Confirme'].map((lvl) => (
-                <Pressable
-                  key={lvl}
-                  style={[styles.levelChip, guestLevel === lvl && styles.levelChipActive]}
-                  onPress={() => setGuestLevel(lvl)}
-                >
-                  <Text style={[styles.levelChipText, guestLevel === lvl && styles.levelChipTextActive]}>{lvl}</Text>
-                </Pressable>
-              ))}
+          {matchMode === 'friendly' ? (
+            <View style={styles.rowWrap}>
+              <TextInput
+                style={[styles.input, styles.guestInput]}
+                placeholder={t('play.guestName')}
+                placeholderTextColor={theme.colors.muted}
+                value={guestName}
+                onChangeText={setGuestName}
+              />
+              <View style={styles.guestLevels}>
+                {[
+                  { value: 'Debutant', label: t('play.guestBeginner') },
+                  { value: 'Intermediaire', label: t('play.guestIntermediate') },
+                  { value: 'Confirme', label: t('play.guestAdvanced') },
+                ].map((lvl) => (
+                  <Pressable
+                    key={lvl.value}
+                    style={[styles.levelChip, guestLevel === lvl.value && styles.levelChipActive]}
+                    onPress={() => setGuestLevel(lvl.value)}
+                  >
+                    <Text style={[styles.levelChipText, guestLevel === lvl.value && styles.levelChipTextActive]}>{lvl.label}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              <Pressable style={styles.addGuestBtn} onPress={addGuest}>
+                <Text style={styles.addGuestText}>{t('play.addGuest')}</Text>
+              </Pressable>
             </View>
-            <Pressable style={styles.addGuestBtn} onPress={addGuest}>
-              <Text style={styles.addGuestText}>Ajouter invite</Text>
-            </Pressable>
-          </View>
+          ) : (
+            <Text style={styles.meta}>{t('play.noGuestRanked')}</Text>
+          )}
 
           <View style={styles.wrap}>
             {guests.map((g) => (
@@ -462,30 +690,12 @@ export function PlayScreen() {
               </Pressable>
             ))}
           </View>
-          <Text style={styles.meta}>Selection totale: {selectedSlots.length}/3</Text>
+          <Text style={styles.meta}>{t('play.selectedTotal', { count: selectedSlots.length })}</Text>
         </Card>
 
         <Card>
           <View style={styles.optionRow}>
-            <Text style={styles.optionLabel}>Mode de match</Text>
-            <View style={styles.row}>
-              <Pressable
-                style={[styles.serverBtn, matchMode === 'ranked' && styles.serverBtnActive]}
-                onPress={() => setMatchMode('ranked')}
-              >
-                <Text style={[styles.serverBtnText, matchMode === 'ranked' && styles.serverBtnTextActive]}>Classe</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.serverBtn, matchMode === 'friendly' && styles.serverBtnActive]}
-                onPress={() => setMatchMode('friendly')}
-              >
-                <Text style={[styles.serverBtnText, matchMode === 'friendly' && styles.serverBtnTextActive]}>Amical</Text>
-              </Pressable>
-            </View>
-          </View>
-
-          <View style={styles.optionRow}>
-            <Text style={styles.optionLabel}>Punto de Oro</Text>
+            <Text style={styles.optionLabel}>{t('play.punto')}</Text>
             <Switch
               value={score.config.puntoDeOro}
               onValueChange={(value) => setScore((prev) => setPuntoDeOro(prev, value))}
@@ -495,7 +705,7 @@ export function PlayScreen() {
           </View>
 
           <View style={styles.optionRow}>
-            <Text style={styles.optionLabel}>Changement de cote auto</Text>
+            <Text style={styles.optionLabel}>{t('play.autoSide')}</Text>
             <Switch
               value={autoSideSwitch}
               onValueChange={setAutoSideSwitch}
@@ -504,51 +714,53 @@ export function PlayScreen() {
             />
           </View>
 
-          <Text style={styles.meta}>Regle 40-40: {score.config.puntoDeOro ? 'Punto de Oro' : 'Avantage'}.</Text>
-          <Text style={styles.meta}>Format auto: {matchFormatLabel(user.settings?.matchFormat)}.</Text>
+          <Text style={styles.meta}>{t('play.rule', { rule: score.config.puntoDeOro ? t('home.pointPunto') : t('home.pointAdv') })}</Text>
+          <Text style={styles.meta}>{t('play.formatAuto', { format: matchFormatLabel(user.settings?.matchFormat, t) })}</Text>
+          <Text style={styles.meta}>{t('play.setsRequired', { sets: score.config.setsToWin, tb: score.config.tieBreakPoints })}</Text>
+          <Text style={styles.meta}>{t('play.autoSaveState', { state: autoSaveMatch ? t('play.autoStateOn') : t('play.autoStateOff') })}</Text>
 
           <View style={styles.optionRow}>
-            <Text style={styles.optionLabel}>Serveur initial</Text>
+            <Text style={styles.optionLabel}>{t('play.initialServer')}</Text>
             <View style={styles.row}>
               <Pressable
                 style={[styles.serverBtn, score.server === 'a' && styles.serverBtnActive]}
                 onPress={() => setScore((prev) => setInitialServer(prev, 'a'))}
               >
-                <Text style={[styles.serverBtnText, score.server === 'a' && styles.serverBtnTextActive]}>Rouge</Text>
+                <Text style={[styles.serverBtnText, score.server === 'a' && styles.serverBtnTextActive]}>{t('play.red')}</Text>
               </Pressable>
               <Pressable
                 style={[styles.serverBtn, score.server === 'b' && styles.serverBtnActive]}
                 onPress={() => setScore((prev) => setInitialServer(prev, 'b'))}
               >
-                <Text style={[styles.serverBtnText, score.server === 'b' && styles.serverBtnTextActive]}>Bleue</Text>
+                <Text style={[styles.serverBtnText, score.server === 'b' && styles.serverBtnTextActive]}>{t('play.blue')}</Text>
               </Pressable>
             </View>
           </View>
 
           <Pressable style={styles.fullBtn} onPress={() => setFullScreenMode(true)}>
-            <Text style={styles.fullBtnText}>Mode arbitre plein ecran</Text>
+            <Text style={styles.fullBtnText}>{t('play.fullscreen')}</Text>
           </Pressable>
         </Card>
 
         <Card>
-          <Text style={styles.sectionTitle}>3) Enregistrer le match</Text>
-          <Text style={styles.label}>Cout total terrain (EUR)</Text>
+          <Text style={styles.sectionTitle}>{t('play.saveSection')}</Text>
+          <Text style={styles.label}>{t('play.courtCost')}</Text>
           <TextInput style={styles.input} value={totalCost} onChangeText={setTotalCost} keyboardType="numeric" />
         </Card>
 
         <Pressable style={styles.cta} onPress={createManual}>
-          <Text style={styles.ctaText}>Enregistrer manuellement</Text>
+          <Text style={styles.ctaText}>{t('play.saveManual')}</Text>
         </Pressable>
 
         {!!feedback && <Text style={styles.feedback}>{feedback}</Text>}
 
         <Card>
-          <Text style={styles.sectionTitle}>Matchs recents</Text>
+          <Text style={styles.sectionTitle}>{t('play.recentMatches')}</Text>
           {matches.length === 0 ? (
-            <Text style={styles.meta}>Aucun match</Text>
+            <Text style={styles.meta}>{t('play.noMatch')}</Text>
           ) : (
             matches.slice(0, 8).map((match) => (
-              <MatchCard key={match.id} match={match} onValidate={validate} />
+              <MatchCard key={match.id} match={match} onValidate={validate} onOpenPir={setPirDetail} t={t} />
             ))
           )}
         </Card>
@@ -570,14 +782,14 @@ export function PlayScreen() {
       >
         <SafeAreaView style={styles.fullRoot}>
           <View style={styles.fullTop}>
-            <Text style={styles.fullTitle}>Mode arbitre</Text>
+            <Text style={styles.fullTitle}>{t('play.referee')}</Text>
             <Pressable style={styles.fullClose} onPress={() => setFullScreenMode(false)}>
-              <Text style={styles.fullCloseText}>Fermer</Text>
+              <Text style={styles.fullCloseText}>{t('home.close')}</Text>
             </Pressable>
           </View>
 
           <View style={styles.refControlsRow}>
-            <Text style={styles.refControlsLabel}>Forcer affichage paysage</Text>
+            <Text style={styles.refControlsLabel}>{t('play.forceLandscape')}</Text>
             <Switch
               value={forceLandscapeLayout}
               onValueChange={setForceLandscapeLayout}
@@ -587,14 +799,19 @@ export function PlayScreen() {
           </View>
 
           <View style={[styles.refInfoRow, !refereeLandscape && styles.refInfoRowPortrait]}>
-            <Text style={styles.refInfoText}>{displayPoints.tieBreak ? 'Tie-break actif' : 'Jeu standard (15-30-40)'}</Text>
-            <Text style={styles.refInfoText}>Sets: {score.sets.map((set) => `${set.a}-${set.b}`).join(' / ') || 'aucun'}</Text>
+            <Text style={styles.refInfoText}>{displayPoints.tieBreak ? t('play.tieBreakOn') : t('play.standardGame')}</Text>
+            <Text style={styles.refInfoText}>{t('play.setsLabel')}: {score.sets.map((set) => `${set.a}-${set.b}`).join(' / ') || t('play.noSets')}</Text>
             <Text style={styles.refInfoText}>
-              Service: {currentServer === 'a' ? 'Rouge' : 'Bleue'} · Sets gagnes {setsWonA}-{setsWonB} (objectif {score.config.setsToWin})
+              {t('play.service', {
+                team: currentServer === 'a' ? t('play.red') : t('play.blue'),
+                a: setsWonA,
+                b: setsWonB,
+                target: score.config.setsToWin,
+              })}
             </Text>
           </View>
 
-          {score.sideChangeAlert ? <Text style={styles.sideChange}>Changement de cote recommande.</Text> : null}
+          {score.sideChangeAlert ? <Text style={styles.sideChange}>{t('play.sideChange')}</Text> : null}
 
           <View style={[styles.refBoard, refereeLayoutStyle]}>
             <RefereeSide
@@ -606,6 +823,9 @@ export function PlayScreen() {
               pointSize={pointSize}
               gameSize={gameSize}
               titleSize={titleSize}
+              teamLabel={slotA === 'a' ? t('play.teamRed') : t('play.teamBlue')}
+              gamesLabel={t('play.games')}
+              tapHint={t('play.tapPoint')}
             />
             <RefereeSide
               team={slotB}
@@ -616,15 +836,18 @@ export function PlayScreen() {
               pointSize={pointSize}
               gameSize={gameSize}
               titleSize={titleSize}
+              teamLabel={slotB === 'a' ? t('play.teamRed') : t('play.teamBlue')}
+              gamesLabel={t('play.games')}
+              tapHint={t('play.tapPoint')}
             />
           </View>
 
           <View style={styles.refActions}>
             <Pressable style={[styles.actionBtn, styles.undoBtn]} onPress={() => setScore((prev) => undoPoint(prev))}>
-              <Text style={styles.actionText}>Annuler dernier point</Text>
+              <Text style={styles.actionText}>{t('play.undo')}</Text>
             </Pressable>
             <Pressable style={[styles.actionBtn, styles.resetBtn]} onPress={() => setScore(resetScore(score.config))}>
-              <Text style={styles.actionText}>Reinitialiser score</Text>
+              <Text style={styles.actionText}>{t('play.reset')}</Text>
             </Pressable>
           </View>
         </SafeAreaView>
@@ -642,15 +865,62 @@ export function PlayScreen() {
               },
             ]}
           >
-            <Text style={styles.cinematicTitle}>{winnerTone?.title ?? 'VICTOIRE'}</Text>
-            <Text style={styles.cinematicTeam}>{score.winner === 'a' ? 'Equipe Rouge' : 'Equipe Bleue'}</Text>
-            <Text style={styles.cinematicSub}>{winnerTone?.subtitle ?? ''}</Text>
-            <Text style={styles.cinematicSub}>Score final: {setsPayload.map((set) => `${set.a}-${set.b}`).join(' / ')}</Text>
-            <Text style={styles.cinematicSub}>{savedMatchId ? `Match ${savedMatchId.slice(-6)} enregistre.` : 'Enregistrement en cours...'}</Text>
+            <Text style={styles.cinematicTitle}>{winnerTone ? t(winnerTone.titleKey) : t('play.victoryDefault')}</Text>
+            <Text style={styles.cinematicTeam}>{score.winner === 'a' ? t('play.teamRedName') : t('play.teamBlueName')}</Text>
+            <Text style={styles.cinematicSub}>{winnerTone ? t(winnerTone.subtitleKey) : ''}</Text>
+            <Text style={styles.cinematicSub}>{t('play.finalScore', { score: setsPayload.map((set) => `${set.a}-${set.b}`).join(' / ') })}</Text>
+            <Text style={styles.cinematicSub}>
+              {savedMatchId ? t('play.matchSaved', { id: savedMatchId.slice(-6) }) : t('play.matchSaving')}
+            </Text>
+            {savedInviteUrl ? (
+              <Pressable style={styles.cinematicBtnSecondary} onPress={shareInvite}>
+                <Text style={styles.cinematicBtnSecondaryText}>{t('play.share')}</Text>
+              </Pressable>
+            ) : null}
             <Pressable style={styles.cinematicBtn} onPress={closeVictory}>
-              <Text style={styles.cinematicBtnText}>Continuer</Text>
+              <Text style={styles.cinematicBtnText}>{t('play.continue')}</Text>
             </Pressable>
           </Animated.View>
+        </View>
+      </Modal>
+
+      <QrScannerModal
+        visible={qrScannerOpen}
+        title={t('play.scanQr')}
+        subtitle={t('play.scanPlayerQrSub')}
+        onScan={onScanPlayerQr}
+        onClose={() => setQrScannerOpen(false)}
+      />
+
+      <Modal visible={Boolean(pirDetail)} transparent animationType="fade" onRequestClose={() => setPirDetail(null)}>
+        <View style={styles.cinematicBackdrop}>
+          <View style={[styles.cinematicCard, styles.pirModal]}>
+            <Text style={styles.cinematicTitle}>{t('play.detailsPir')}</Text>
+            <Text style={styles.cinematicSub}>{t('play.matchLabel', { id: pirDetail?.id?.slice(-6) ?? '' })}</Text>
+            {pirDetail?.pirImpact ? (
+              <>
+                <Text style={styles.cinematicSub}>
+                  {t('play.pirDelta', {
+                    delta: `${Number(pirDetail.pirImpact.delta ?? 0) > 0 ? '+' : ''}${Number(pirDetail.pirImpact.delta ?? 0).toFixed(2)}`,
+                  })}
+                </Text>
+                {(pirDetail.pirImpact.reasons ?? []).map((line, index) => (
+                  <Text key={`pir-line-${index}`} style={styles.cinematicSub}>• {line}</Text>
+                ))}
+                <Text style={styles.cinematicSub}>
+                  {t('play.pirValidation', {
+                    accepted: pirDetail?.validation?.accepted ?? 0,
+                    required: pirDetail?.validation?.required ?? 0,
+                  })}
+                </Text>
+              </>
+            ) : (
+              <Text style={styles.cinematicSub}>{t('play.pirWaiting')}</Text>
+            )}
+            <Pressable style={styles.cinematicBtn} onPress={() => setPirDetail(null)}>
+              <Text style={styles.cinematicBtnText}>{t('home.close')}</Text>
+            </Pressable>
+          </View>
         </View>
       </Modal>
     </>
@@ -663,11 +933,34 @@ const styles = StyleSheet.create({
   header: { marginBottom: 4 },
   eyebrow: { color: theme.colors.accent2, fontFamily: theme.fonts.mono, letterSpacing: 1, fontSize: 11 },
   h1: { color: theme.colors.text, fontSize: 40, lineHeight: 42, fontFamily: theme.fonts.display },
+  headerSub: { color: '#BED3E1', fontFamily: theme.fonts.body, fontSize: 13, marginTop: 4, maxWidth: 320 },
   sectionTitle: { color: theme.colors.text, fontFamily: theme.fonts.title, marginBottom: 8, fontSize: 16 },
   label: { color: theme.colors.muted, marginBottom: 4, marginTop: 4, fontFamily: theme.fonts.body },
   meta: { color: theme.colors.muted, marginBottom: 6, fontFamily: theme.fonts.body },
   wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
   rowWrap: { gap: 8, marginBottom: 8 },
+  modeBtn: {
+    flex: 1,
+    minHeight: 72,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: theme.colors.line,
+    backgroundColor: theme.colors.bgAlt,
+    padding: 10,
+    gap: 4,
+  },
+  modeBtnActiveFriendly: {
+    borderColor: '#2E6F5E',
+    backgroundColor: '#1E5A4D',
+  },
+  modeBtnActiveRanked: {
+    borderColor: theme.colors.accent,
+    backgroundColor: '#5C4A17',
+  },
+  modeBtnTitle: { color: theme.colors.text, fontFamily: theme.fonts.title, fontSize: 14, textTransform: 'uppercase' },
+  modeBtnTitleActive: { color: '#FFF8E8' },
+  modeBtnSub: { color: theme.colors.muted, fontFamily: theme.fonts.body, fontSize: 11 },
+  modeBtnSubActive: { color: '#F2E7CB' },
   playerChip: {
     paddingVertical: 10,
     paddingHorizontal: 12,
@@ -680,6 +973,27 @@ const styles = StyleSheet.create({
   playerText: { color: theme.colors.text, fontFamily: theme.fonts.title, fontSize: 12 },
   playerTextActive: { color: '#3A2500' },
   guestInput: { minHeight: 44 },
+  rowTagInput: { flex: 1, minHeight: 44 },
+  tagBtn: {
+    minHeight: 44,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    backgroundColor: '#2B5873',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  tagBtnText: { color: '#EAF5FF', fontFamily: theme.fonts.title, fontSize: 11, textTransform: 'uppercase' },
+  tagBtnGhost: {
+    minHeight: 44,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: '#4F7187',
+    backgroundColor: '#173245',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  tagBtnGhostText: { color: '#D8EBFA', fontFamily: theme.fonts.title, fontSize: 11, textTransform: 'uppercase' },
   guestLevels: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   levelChip: {
     borderRadius: 8,
@@ -764,6 +1078,36 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.bgAlt,
   },
   matchTitle: { color: theme.colors.text, fontFamily: theme.fonts.title, marginBottom: 4 },
+  pirBox: {
+    marginBottom: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#36546B',
+    backgroundColor: 'rgba(13, 37, 54, 0.8)',
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    gap: 2,
+  },
+  pirTitle: { color: '#F4D35E', fontFamily: theme.fonts.title, fontSize: 13 },
+  pirMeta: { color: '#B9D0DD', fontFamily: theme.fonts.body, fontSize: 12 },
+  pirReason: { color: '#9EB9C8', fontFamily: theme.fonts.body, fontSize: 12 },
+  pirDetailBtn: {
+    marginTop: 4,
+    minHeight: 32,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#53738A',
+    backgroundColor: '#173245',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  pirDetailBtnText: {
+    color: '#D8EBFA',
+    fontFamily: theme.fonts.title,
+    fontSize: 11,
+    textTransform: 'uppercase',
+    letterSpacing: 0.7,
+  },
 
   fullRoot: { flex: 1, backgroundColor: '#07141F', padding: 10 },
   fullTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
@@ -829,9 +1173,30 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
+  pirModal: {
+    gap: 10,
+  },
   cinematicTitle: { color: '#F4D35E', fontFamily: theme.fonts.display, fontSize: 34, lineHeight: 36 },
   cinematicTeam: { color: '#F8FBFF', fontFamily: theme.fonts.title, fontSize: 18 },
   cinematicSub: { color: '#AEC2D0', fontFamily: theme.fonts.body, textAlign: 'center' },
+  cinematicBtnSecondary: {
+    marginTop: 6,
+    minHeight: 40,
+    minWidth: 160,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#6A8BA1',
+    backgroundColor: '#173246',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  cinematicBtnSecondaryText: {
+    color: '#D6EBF8',
+    fontFamily: theme.fonts.title,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    fontSize: 11,
+  },
   cinematicBtn: {
     marginTop: 8,
     minHeight: 44,

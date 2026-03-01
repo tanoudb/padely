@@ -61,6 +61,39 @@ export function computeLeadershipBonus(playerRating, partnerRating, didWin) {
   return 0;
 }
 
+export function computeUpsetBonus({
+  playerTeamRating = 0,
+  opponentTeamRating = 0,
+  didWin = false,
+}) {
+  if (!didWin) {
+    return 0;
+  }
+  const diff = opponentTeamRating - playerTeamRating;
+  if (diff <= 0) {
+    return 0;
+  }
+  return round(clamp(diff / 180, 0, 3.5), 2);
+}
+
+export function computeLossProtection({
+  expectedWin = 0.5,
+  didWin = false,
+  gameDiff = 0,
+}) {
+  if (didWin) {
+    return 0;
+  }
+
+  const closeLoss = Math.abs(gameDiff) <= 2;
+  if (!closeLoss) {
+    return 0;
+  }
+
+  // Small protection when losing an expected close match.
+  return round(clamp(expectedWin * 1.6, 0, 1.6), 2);
+}
+
 export function computePairExpected(pairRating, opponentPairRating) {
   return winProbability(pairRating, opponentPairRating);
 }

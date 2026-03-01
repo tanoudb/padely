@@ -4,6 +4,21 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function withTtl(ttlMs) {
+  const safeTtl = Math.max(60 * 1000, Number(ttlMs) || 72 * 60 * 60 * 1000);
+  return new Date(Date.now() + safeTtl).toISOString();
+}
+
+function makeArcadeTag(displayName, id) {
+  const base = String(displayName ?? 'player')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '')
+    .slice(0, 7)
+    .toUpperCase() || 'PLAYER';
+  const suffix = String(id ?? '').replace(/[^a-zA-Z0-9]/g, '').slice(-4).toUpperCase() || '0000';
+  return `${base}#${suffix}`;
+}
+
 export class MemoryStore {
   constructor() {
     this.users = new Map();
@@ -26,7 +41,9 @@ export class MemoryStore {
       passwordHash,
       provider,
       displayName,
+      arcadeTag: makeArcadeTag(displayName, id),
       avatarUrl: null,
+      isAdmin: false,
       createdAt: nowIso(),
       isVerified: typeof isVerified === 'boolean' ? isVerified : provider !== 'email',
       athlete: {
@@ -51,6 +68,10 @@ export class MemoryStore {
         publicProfile: true,
         showGuestMatches: false,
         showHealthStats: true,
+      },
+      community: {
+        customChannels: [],
+        joinedClubChannels: [],
       },
       friends: [],
       calibration: {
@@ -87,21 +108,31 @@ export class MemoryStore {
     return user;
   }
 
-  createSession(userId, token) {
+  createSession(userId, token, ttlMs) {
     this.sessions.set(token, {
       token,
       userId,
       createdAt: nowIso(),
+      expiresAt: withTtl(ttlMs),
     });
   }
 
-  createEmailVerificationToken(userId, token, expiresAt) {
+  createEmailVerificationToken(userId, token, code, expiresAt) {
     this.emailVerifications.set(token, {
       token,
       userId,
+      code: String(code),
       expiresAt,
       createdAt: nowIso(),
     });
+  }
+
+  deleteEmailVerificationTokensForUser(userId) {
+    for (const [token, item] of this.emailVerifications.entries()) {
+      if (item.userId === userId) {
+        this.emailVerifications.delete(token);
+      }
+    }
   }
 
   consumeEmailVerificationToken(token) {
@@ -113,8 +144,38 @@ export class MemoryStore {
     return current;
   }
 
+  consumeEmailVerificationCode(userId, code) {
+    const wanted = String(code).trim();
+    let matchToken = null;
+    let matchItem = null;
+
+    for (const [token, item] of this.emailVerifications.entries()) {
+      if (item.userId === userId && String(item.code) === wanted) {
+        if (!matchItem || item.createdAt > matchItem.createdAt) {
+          matchToken = token;
+          matchItem = item;
+        }
+      }
+    }
+
+    if (!matchToken || !matchItem) {
+      return null;
+    }
+
+    this.emailVerifications.delete(matchToken);
+    return matchItem;
+  }
+
   getSession(token) {
-    return this.sessions.get(token) ?? null;
+    const current = this.sessions.get(token) ?? null;
+    if (!current) {
+      return null;
+    }
+    if (current.expiresAt && new Date(current.expiresAt).getTime() < Date.now()) {
+      this.sessions.delete(token);
+      return null;
+    }
+    return current;
   }
 
   createMatch(match) {

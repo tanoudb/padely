@@ -1,26 +1,41 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { theme } from '../theme';
+import { useI18n } from '../state/i18n';
+import { useUi } from '../state/ui';
 
 const TABS = [
-  { key: 'home', label: 'Accueil' },
-  { key: 'play', label: 'Match' },
-  { key: 'crew', label: 'Crew' },
-  { key: 'profile', label: 'Profil' },
+  { key: 'home', i18n: 'tabs.home', icon: '◉' },
+  { key: 'play', i18n: 'tabs.play', icon: '✦' },
+  { key: 'crew', i18n: 'tabs.social', icon: '◎' },
+  { key: 'profile', i18n: 'tabs.profile', icon: '◍' },
 ];
 
 export function TabBar({ active, onChange }) {
+  const { palette } = useUi();
+  const { t } = useI18n();
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: `${palette.bgAlt}EE`, borderTopColor: palette.line }]}>
       {TABS.map((tab) => {
         const isActive = tab.key === active;
         return (
           <Pressable
             key={tab.key}
-            style={[styles.button, isActive && styles.buttonActive]}
+            style={[
+              styles.button,
+              {
+                backgroundColor: palette.chip,
+                borderColor: `${palette.line}AA`,
+              },
+              isActive && {
+                backgroundColor: palette.accent,
+                borderColor: palette.accent,
+              },
+            ]}
             onPress={() => onChange(tab.key)}
           >
-            <Text style={[styles.label, isActive && styles.labelActive]}>{tab.label}</Text>
+            <Text style={[styles.icon, { color: isActive ? '#3A2500' : palette.muted }]}>{tab.icon}</Text>
+            <Text style={[styles.label, { color: palette.text }, isActive && styles.labelActive]}>{t(tab.i18n)}</Text>
             {isActive ? <View style={styles.dot} /> : null}
           </Pressable>
         );
@@ -32,9 +47,7 @@ export function TabBar({ active, onChange }) {
 const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(11, 34, 49, 0.95)',
     borderTopWidth: 1,
-    borderTopColor: theme.colors.line,
     paddingHorizontal: 8,
     paddingTop: 8,
     paddingBottom: 10,
@@ -46,18 +59,12 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: theme.colors.chip,
     borderWidth: 1,
-    borderColor: 'rgba(41, 81, 105, 0.65)',
   },
-  buttonActive: {
-    backgroundColor: theme.colors.accent,
-    borderColor: theme.colors.accent,
-  },
+  icon: { fontSize: 12, marginBottom: 2 },
   label: {
-    color: theme.colors.text,
     fontFamily: theme.fonts.title,
-    fontSize: 11,
+    fontSize: 10,
     textTransform: 'uppercase',
     letterSpacing: 0.8,
   },

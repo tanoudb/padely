@@ -42,6 +42,8 @@ export function createScoreState(config = {}) {
       tieBreakPoints: config.tieBreakPoints ?? 7,
       superTieBreakPoints: config.superTieBreakPoints ?? 10,
       setsToWin: config.setsToWin ?? 3,
+      gamesToWinSet: config.gamesToWinSet ?? 6,
+      tieBreakAtGames: config.tieBreakAtGames ?? 6,
       noTieBreakInDecidingSet: config.noTieBreakInDecidingSet ?? true,
       decidingSetMode: config.decidingSetMode ?? 'full_set',
     },
@@ -127,19 +129,21 @@ function maybeSetEnd(state) {
   const gb = state.currentSet.b;
   const diff = Math.abs(ga - gb);
   const setIndex = state.sets.length;
+  const gamesToWinSet = state.config.gamesToWinSet ?? 6;
+  const tieBreakAtGames = state.config.tieBreakAtGames ?? gamesToWinSet;
 
-  if (ga >= 6 || gb >= 6) {
-    if (ga === 6 && gb === 6 && shouldUseTieBreak(setIndex, state.config)) {
-      state.tieBreak.active = true;
-      state.tieBreak.a = 0;
-      state.tieBreak.b = 0;
-      state.tieBreak.firstServer = state.server;
-      state.tieBreak.target = state.config.tieBreakPoints;
-      state.lastEvent = 'Tie-break';
-      return;
-    }
+  if (ga === tieBreakAtGames && gb === tieBreakAtGames && shouldUseTieBreak(setIndex, state.config)) {
+    state.tieBreak.active = true;
+    state.tieBreak.a = 0;
+    state.tieBreak.b = 0;
+    state.tieBreak.firstServer = state.server;
+    state.tieBreak.target = state.config.tieBreakPoints;
+    state.lastEvent = 'Tie-break';
+    return;
+  }
 
-    if (diff >= 2 && (ga >= 6 || gb >= 6)) {
+  if (ga >= gamesToWinSet || gb >= gamesToWinSet) {
+    if (diff >= 2 && (ga >= gamesToWinSet || gb >= gamesToWinSet)) {
       finalizeSet(state);
       return;
     }

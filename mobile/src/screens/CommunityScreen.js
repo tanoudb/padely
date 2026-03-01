@@ -1,313 +1,1025 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import * as Location from 'expo-location';
+import { LinearGradient } from 'expo-linear-gradient';
 import { api } from '../api/client';
 import { Card } from '../components/Card';
+import { QrScannerModal } from '../components/QrScannerModal';
+import { useI18n } from '../state/i18n';
 import { useSession } from '../state/session';
 import { theme } from '../theme';
 
-function MessageRow({ item }) {
+const CITY_PRESETS = ['Lyon', 'Paris', 'Marseille', 'Bordeaux', 'Toulouse', 'Lille'];
+
+const TOP_TABS = [
+  { key: 'home', i18n: 'community.tabsHome' },
+  { key: 'regional', i18n: 'community.tabsRegional' },
+  { key: 'channels', i18n: 'community.tabsChannels' },
+  { key: 'clubs', i18n: 'community.tabsClubs' },
+];
+
+function initials(name) {
+  const safe = String(name ?? '').trim();
+  if (!safe) return '??';
+  const parts = safe.split(' ').filter(Boolean);
+  if (parts.length === 1) return safe.slice(0, 2).toUpperCase();
+  return `${parts[0][0] ?? ''}${parts[1][0] ?? ''}`.toUpperCase();
+}
+
+function formatTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+function greetingLine(name, t) {
+  const hour = new Date().getHours();
+  const firstName = String(name ?? 'Champion').trim().split(' ')[0] || 'Champion';
+  if (hour < 12) return t('community.greetingMorning', { name: firstName });
+  if (hour < 18) return t('community.greetingAfternoon', { name: firstName });
+  return t('community.greetingEvening', { name: firstName });
+}
+
+function Avatar({ name, active = false }) {
   return (
-    <View style={styles.messageRow}>
-      <Text style={styles.messageAuthor}>{item.senderName ?? item.fromUserId}</Text>
-      <Text style={styles.messageText}>{item.text}</Text>
+    <View style={[styles.avatar, active && styles.avatarActive]}>
+      <Text style={[styles.avatarText, active && styles.avatarTextActive]}>{initials(name)}</Text>
     </View>
   );
 }
 
+function ChannelPill({ label, active, onPress }) {
+  return (
+    <Pressable style={[styles.channelPill, active && styles.channelPillActive]} onPress={onPress}>
+      <Text style={[styles.channelPillText, active && styles.channelPillTextActive]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function PostCard({ item, mine, t }) {
+  return (
+    <Card style={styles.postCard}>
+      <View style={styles.postHead}>
+        <View style={styles.postAuthorWrap}>
+          <Avatar name={item.senderName} active={mine} />
+          <View>
+            <Text style={styles.postAuthor}>{mine ? t('community.me') : item.senderName}</Text>
+            <Text style={styles.postMeta}>{item.channelLabel} · {formatTime(item.createdAt)}</Text>
+          </View>
+        </View>
+      </View>
+      <Text style={styles.postText}>{item.text}</Text>
+    </Card>
+  );
+}
+
+function DmBubble({ mine, text, createdAt }) {
+  return (
+    <View style={[styles.dmBubble, mine ? styles.dmBubbleMine : styles.dmBubbleOther]}>
+      <Text style={styles.dmBubbleText}>{text}</Text>
+      <Text style={styles.dmTime}>{formatTime(createdAt)}</Text>
+    </View>
+  );
+}
+
+function messageKey(item, index, prefix = 'msg') {
+  const base = item?.id ?? `${item?.senderId ?? 'u'}_${item?.createdAt ?? 't'}`;
+  return `${prefix}_${base}_${index}`;
+}
+
+function clubCodeFromQrValue(raw) {
+  const value = String(raw ?? '').trim();
+  if (!value) return '';
+
+  if (value.startsWith('padely://club/')) {
+    return decodeURIComponent(value.slice('padely://club/'.length)).trim();
+  }
+
+  if (value.startsWith('PADELY_CLUB:')) {
+    return value.slice('PADELY_CLUB:'.length).trim();
+  }
+
+  if (value.startsWith('http://') || value.startsWith('https://')) {
+    try {
+      const url = new URL(value);
+      const qpCode = url.searchParams.get('code');
+      if (qpCode) return qpCode.trim();
+      const chunks = url.pathname.split('/').filter(Boolean);
+      if (chunks.length >= 2 && chunks[chunks.length - 2] === 'club') {
+        return decodeURIComponent(chunks[chunks.length - 1]).trim();
+      }
+    } catch {
+      return value;
+    }
+  }
+
+  return value;
+}
+
 export function CommunityScreen() {
   const { token, user } = useSession();
+  const { t } = useI18n();
+
+  const [activeTab, setActiveTab] = useState('home');
   const [city, setCity] = useState(user.city ?? 'Lyon');
+  const [isLocating, setIsLocating] = useState(false);
+  const [cityPickerOpen, setCityPickerOpen] = useState(false);
+
   const [crew, setCrew] = useState(null);
   const [players, setPlayers] = useState([]);
-  const [selectedChannel, setSelectedChannel] = useState('france');
-  const [channelMessages, setChannelMessages] = useState([]);
-  const [channelInput, setChannelInput] = useState('');
   const [selectedFriend, setSelectedFriend] = useState('');
   const [dmMessages, setDmMessages] = useState([]);
   const [dmInput, setDmInput] = useState('');
 
-  async function refreshCrew() {
-    const [crewOut, playerPool] = await Promise.all([
-      api.crew(token, city),
-      api.listPlayers(token),
-    ]);
-    setCrew(crewOut);
-    setPlayers(playerPool.filter((p) => p.id !== user.id));
+  const [selectedRegionalChannel, setSelectedRegionalChannel] = useState('');
+  const [selectedChannel, setSelectedChannel] = useState('france');
+  const [selectedClubChannel, setSelectedClubChannel] = useState('');
+  const [channelCache, setChannelCache] = useState({});
 
-    const firstChannel = crewOut.channels?.[0]?.key ?? 'france';
-    setSelectedChannel((prev) => prev || firstChannel);
+  const [homeInput, setHomeInput] = useState('');
+  const [regionalInput, setRegionalInput] = useState('');
+  const [channelInput, setChannelInput] = useState('');
+  const [clubInput, setClubInput] = useState('');
+
+  const [newChannelName, setNewChannelName] = useState('');
+  const [clubCode, setClubCode] = useState('');
+  const [clubQrOpen, setClubQrOpen] = useState(false);
+  const [error, setError] = useState('');
+
+  const greeting = useMemo(() => greetingLine(user.displayName, t), [user.displayName, t]);
+
+  async function detectCityFromLocation() {
+    setIsLocating(true);
+    try {
+      const perm = await Location.requestForegroundPermissionsAsync();
+      if (perm.status !== 'granted') {
+        return;
+      }
+
+      const pos = await Location.getCurrentPositionAsync({});
+      const geo = await Location.reverseGeocodeAsync({
+        latitude: pos.coords.latitude,
+        longitude: pos.coords.longitude,
+      });
+      const guess = geo?.[0]?.city || geo?.[0]?.subregion || geo?.[0]?.region;
+      if (guess) {
+        setCity(guess);
+      }
+    } catch {
+      // Silent fallback on manual city chips.
+    } finally {
+      setIsLocating(false);
+    }
+  }
+
+  async function refreshChannelMessages(channelKey) {
+    if (!channelKey) return;
+    try {
+      const list = await api.channelMessages(token, channelKey);
+      setChannelCache((prev) => ({ ...prev, [channelKey]: list }));
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  async function refreshCrew() {
+    setError('');
+    try {
+      const [crewOut, playerPool] = await Promise.all([
+        api.crew(token, city),
+        api.listPlayers(token),
+      ]);
+      setCrew(crewOut);
+      setPlayers(playerPool.filter((p) => p.id !== user.id));
+
+      const regional = crewOut.regionalChannel?.key ?? '';
+      const firstPublic = crewOut.publicChannels?.[0]?.key ?? 'france';
+      const firstFriend = crewOut.friends?.[0]?.id ?? '';
+      const firstClub = crewOut.clubChannels?.[0]?.key ?? '';
+
+      setSelectedRegionalChannel(regional);
+      setSelectedChannel((prev) => prev || firstPublic);
+      setSelectedFriend((prev) => prev || firstFriend);
+      setSelectedClubChannel((prev) => prev || firstClub);
+
+      await Promise.all([
+        refreshChannelMessages('france'),
+        regional ? refreshChannelMessages(regional) : Promise.resolve(),
+        firstPublic ? refreshChannelMessages(firstPublic) : Promise.resolve(),
+        firstClub ? refreshChannelMessages(firstClub) : Promise.resolve(),
+      ]);
+    } catch (e) {
+      setError(e.message);
+    }
   }
 
   useEffect(() => {
-    refreshCrew().catch(() => {});
-  }, [city, token, user.id]);
+    detectCityFromLocation().catch(() => {});
+  }, []);
 
   useEffect(() => {
-    if (!selectedChannel) return;
-    api.channelMessages(token, selectedChannel).then(setChannelMessages).catch(() => {});
-  }, [token, selectedChannel]);
+    refreshCrew().catch(() => {});
+  }, [token, city]);
 
   useEffect(() => {
     if (!selectedFriend) {
       setDmMessages([]);
       return;
     }
-    api.privateMessages(token, selectedFriend).then(setDmMessages).catch(() => {});
+    api.privateMessages(token, selectedFriend)
+      .then(setDmMessages)
+      .catch((e) => setError(e.message));
   }, [token, selectedFriend]);
 
-  const nonFriends = useMemo(() => {
-    const friendSet = new Set((crew?.friends ?? []).map((f) => f.id));
-    return players.filter((p) => !friendSet.has(p.id)).slice(0, 6);
-  }, [crew?.friends, players]);
+  useEffect(() => {
+    refreshChannelMessages(selectedChannel).catch(() => {});
+  }, [selectedChannel]);
 
-  async function sendChannel() {
-    if (!selectedChannel || !channelInput.trim()) return;
-    await api.sendChannelMessage(token, selectedChannel, channelInput.trim());
-    setChannelInput('');
-    const items = await api.channelMessages(token, selectedChannel);
-    setChannelMessages(items);
+  useEffect(() => {
+    refreshChannelMessages(selectedRegionalChannel).catch(() => {});
+  }, [selectedRegionalChannel]);
+
+  useEffect(() => {
+    refreshChannelMessages(selectedClubChannel).catch(() => {});
+  }, [selectedClubChannel]);
+
+  const friends = crew?.friends ?? [];
+  const publicChannels = crew?.publicChannels ?? [];
+  const clubChannels = crew?.clubChannels ?? [];
+  const availableClubs = crew?.availableClubs ?? [];
+
+  const friendSet = useMemo(() => new Set(friends.map((f) => f.id)), [friends]);
+  const suggestedPlayers = useMemo(() => players.filter((p) => !friendSet.has(p.id)).slice(0, 6), [players, friendSet]);
+
+  const channelTitleByKey = useMemo(() => {
+    const map = {};
+    [...publicChannels, ...clubChannels].forEach((ch) => {
+      map[ch.key] = ch.title;
+    });
+    if (crew?.regionalChannel?.key) {
+      map[crew.regionalChannel.key] = crew.regionalChannel.title;
+    }
+    return map;
+  }, [publicChannels, clubChannels, crew?.regionalChannel]);
+
+  const homeFeed = useMemo(() => {
+    const france = channelCache.france ?? [];
+    const regional = selectedRegionalChannel ? (channelCache[selectedRegionalChannel] ?? []) : [];
+    return [...france, ...regional]
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, 16)
+      .map((item) => ({
+        ...item,
+        channelLabel: channelTitleByKey[item.channel] ?? t('community.channelFallback'),
+      }));
+  }, [channelCache, selectedRegionalChannel, channelTitleByKey, t]);
+
+  const selectedChannelFeed = useMemo(() => {
+    return (channelCache[selectedChannel] ?? []).slice(-24).reverse().map((item) => ({
+      ...item,
+      channelLabel: channelTitleByKey[item.channel] ?? t('community.channelFallback'),
+    }));
+  }, [channelCache, selectedChannel, channelTitleByKey, t]);
+
+  const regionalFeed = useMemo(() => {
+    return (channelCache[selectedRegionalChannel] ?? []).slice(-24).reverse().map((item) => ({
+      ...item,
+      channelLabel: channelTitleByKey[item.channel] ?? t('community.regionalFallback'),
+    }));
+  }, [channelCache, selectedRegionalChannel, channelTitleByKey, t]);
+
+  const clubFeed = useMemo(() => {
+    return (channelCache[selectedClubChannel] ?? []).slice(-24).reverse().map((item) => ({
+      ...item,
+      channelLabel: channelTitleByKey[item.channel] ?? t('community.clubFallback'),
+    }));
+  }, [channelCache, selectedClubChannel, channelTitleByKey, t]);
+
+  async function sendChannelMessage(channelKey, text, clearFn) {
+    if (!channelKey || !text.trim()) return;
+    try {
+      await api.sendChannelMessage(token, channelKey, text.trim());
+      clearFn('');
+      await refreshChannelMessages(channelKey);
+      if (channelKey === selectedRegionalChannel || channelKey === 'france') {
+        await Promise.all([
+          refreshChannelMessages('france'),
+          selectedRegionalChannel ? refreshChannelMessages(selectedRegionalChannel) : Promise.resolve(),
+        ]);
+      }
+    } catch (e) {
+      setError(e.message);
+    }
   }
 
   async function sendDM() {
     if (!selectedFriend || !dmInput.trim()) return;
-    await api.sendPrivateMessage(token, selectedFriend, dmInput.trim());
-    setDmInput('');
-    const items = await api.privateMessages(token, selectedFriend);
-    setDmMessages(items);
+    try {
+      await api.sendPrivateMessage(token, selectedFriend, dmInput.trim());
+      setDmInput('');
+      const list = await api.privateMessages(token, selectedFriend);
+      setDmMessages(list);
+    } catch (e) {
+      setError(e.message);
+    }
   }
 
   async function addFriend(friendId) {
-    await api.addFriend(token, friendId);
-    await refreshCrew();
+    try {
+      await api.addFriend(token, friendId);
+      await refreshCrew();
+      setActiveTab('home');
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  async function createChannel() {
+    if (!newChannelName.trim()) return;
+    try {
+      const out = await api.createChannel(token, newChannelName.trim());
+      setNewChannelName('');
+      await refreshCrew();
+      setSelectedChannel(out.key);
+      setActiveTab('channels');
+      await refreshChannelMessages(out.key);
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  async function joinClub(codeValue = clubCode.trim()) {
+    if (!codeValue.trim()) return false;
+    try {
+      const out = await api.joinClubByCode(token, codeValue.trim());
+      setClubCode('');
+      await refreshCrew();
+      setSelectedClubChannel(out.channel.key);
+      setActiveTab('clubs');
+      await refreshChannelMessages(out.channel.key);
+      return true;
+    } catch (e) {
+      setError(e.message);
+      return false;
+    }
+  }
+
+  async function onScanClubQr(rawValue) {
+    const code = clubCodeFromQrValue(rawValue);
+    if (!code) {
+      setError(t('community.invalidClubQr'));
+      return false;
+    }
+    const ok = await joinClub(code);
+    if (ok) {
+      setClubQrOpen(false);
+    }
+    return ok;
   }
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.content}>
-      <View style={styles.header}>
-        <Text style={styles.eyebrow}>CREW</Text>
-        <Text style={styles.h1}>Espace communautaire</Text>
-      </View>
+      <LinearGradient colors={['#163448', '#0C2333', '#081823']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
+        <Text style={styles.heroTitle}>{t('community.title')}</Text>
+        <Text style={styles.heroGreeting}>{greeting}</Text>
+        <Text style={styles.heroPitch}>{t('community.pitch')}</Text>
 
-      <Card elevated>
-        <Text style={styles.label}>Ville regionale</Text>
-        <TextInput style={styles.input} value={city} onChangeText={setCity} placeholderTextColor={theme.colors.muted} />
-      </Card>
-
-      <Card>
-        <Text style={styles.section}>Groupes de discussion</Text>
-        <View style={styles.channelWrap}>
-          {(crew?.channels ?? []).map((ch) => (
-            <Pressable
-              key={ch.key}
-              style={[styles.channelChip, selectedChannel === ch.key && styles.channelChipActive]}
-              onPress={() => setSelectedChannel(ch.key)}
-            >
-              <Text style={[styles.channelChipText, selectedChannel === ch.key && styles.channelChipTextActive]}>{ch.title}</Text>
-            </Pressable>
-          ))}
-        </View>
-
-        <View style={styles.messagesBox}>
-          {channelMessages.slice(-8).map((item) => (
-            <MessageRow key={item.id} item={item} />
-          ))}
-          {channelMessages.length === 0 && <Text style={styles.sub}>Aucun message.</Text>}
-        </View>
-
-        <View style={styles.row}> 
-          <TextInput
-            style={[styles.input, styles.inputCompact]}
-            value={channelInput}
-            onChangeText={setChannelInput}
-            placeholder="Message de groupe"
-            placeholderTextColor={theme.colors.muted}
-          />
-          <Pressable style={styles.btnSmall} onPress={sendChannel}>
-            <Text style={styles.btnSmallLabel}>Envoyer</Text>
+        <View style={styles.heroMetaRow}>
+          <Pressable style={styles.cityChip} onPress={() => setCityPickerOpen((v) => !v)}>
+            <Text style={styles.cityChipText}>{isLocating ? t('community.locating') : `📍 ${city}`}</Text>
+          </Pressable>
+          <Pressable style={styles.cityRefreshChip} onPress={detectCityFromLocation}>
+            <Text style={styles.cityRefreshChipText}>{t('community.auto')}</Text>
           </Pressable>
         </View>
-      </Card>
 
-      <Card>
-        <Text style={styles.section}>Amis & messagerie privee</Text>
-        <View style={styles.channelWrap}>
-          {(crew?.friends ?? []).map((friend) => (
-            <Pressable
-              key={friend.id}
-              style={[styles.channelChip, selectedFriend === friend.id && styles.channelChipActive]}
-              onPress={() => setSelectedFriend(friend.id)}
-            >
-              <Text style={[styles.channelChipText, selectedFriend === friend.id && styles.channelChipTextActive]}>
-                {friend.displayName}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
+        {cityPickerOpen ? (
+          <View style={styles.cityPicker}>
+            {CITY_PRESETS.map((value) => (
+              <Pressable
+                key={value}
+                style={[styles.cityPreset, value.toLowerCase() === city.toLowerCase() && styles.cityPresetActive]}
+                onPress={() => {
+                  setCity(value);
+                  setCityPickerOpen(false);
+                }}
+              >
+                <Text style={[styles.cityPresetText, value.toLowerCase() === city.toLowerCase() && styles.cityPresetTextActive]}>{value}</Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
+      </LinearGradient>
 
-        {selectedFriend ? (
-          <>
-            <View style={styles.messagesBox}>
-              {dmMessages.slice(-8).map((item) => (
-                <MessageRow key={item.id} item={item} />
+      <View style={styles.topTabs}>
+        {TOP_TABS.map((tab) => (
+          <Pressable
+            key={tab.key}
+            style={[styles.topTab, activeTab === tab.key && styles.topTabActive]}
+            onPress={() => setActiveTab(tab.key)}
+          >
+            <Text style={[styles.topTabText, activeTab === tab.key && styles.topTabTextActive]}>{t(tab.i18n)}</Text>
+          </Pressable>
+        ))}
+      </View>
+
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+
+      {activeTab === 'home' ? (
+        <>
+          <Card>
+            <Text style={styles.sectionTitle}>{t('community.friendsMessages')}</Text>
+            <View style={styles.friendsWrap}>
+              {friends.map((friend) => (
+                <Pressable
+                  key={friend.id}
+                  style={[styles.friendChip, selectedFriend === friend.id && styles.friendChipActive]}
+                  onPress={() => setSelectedFriend(friend.id)}
+                >
+                  <Avatar name={friend.displayName} active={selectedFriend === friend.id} />
+                  <Text style={[styles.friendChipText, selectedFriend === friend.id && styles.friendChipTextActive]}>{friend.displayName}</Text>
+                </Pressable>
               ))}
-              {dmMessages.length === 0 && <Text style={styles.sub}>Aucun message prive.</Text>}
             </View>
+
+            {selectedFriend ? (
+              <>
+                <View style={styles.dmBox}>
+                  {dmMessages.slice(-10).map((item, index) => (
+                    <DmBubble
+                      key={messageKey(item, index, 'dm')}
+                      mine={item.fromUserId === user.id}
+                      text={item.text}
+                      createdAt={item.createdAt}
+                    />
+                  ))}
+                  {dmMessages.length === 0 ? <Text style={styles.emptyText}>{t('community.startPrivateChat')}</Text> : null}
+                </View>
+                <View style={styles.row}>
+                  <TextInput
+                    style={[styles.input, styles.rowInput]}
+                    value={dmInput}
+                    onChangeText={setDmInput}
+                    placeholder={t('community.writePartner')}
+                    placeholderTextColor={theme.colors.muted}
+                  />
+                  <Pressable style={styles.actionBtn} onPress={sendDM}>
+                    <Text style={styles.actionBtnText}>{t('community.send')}</Text>
+                  </Pressable>
+                </View>
+              </>
+            ) : (
+              <Text style={styles.emptyText}>{t('community.noFriends')}</Text>
+            )}
+          </Card>
+
+          {suggestedPlayers.length > 0 ? (
+            <Card>
+              <Text style={styles.sectionTitle}>{t('community.newPartners')}</Text>
+              {suggestedPlayers.map((p) => (
+                <View key={p.id} style={styles.suggestRow}>
+                  <View style={styles.suggestLeft}>
+                    <Avatar name={p.displayName} />
+                    <View>
+                      <Text style={styles.suggestName}>{p.displayName}</Text>
+                      <Text style={styles.suggestMeta}>{p.city ?? t('community.unknownCity')} · PIR {Math.round(p.rating)}</Text>
+                    </View>
+                  </View>
+                  <Pressable style={styles.addBtn} onPress={() => addFriend(p.id)}>
+                    <Text style={styles.addBtnText}>{t('community.add')}</Text>
+                  </Pressable>
+                </View>
+              ))}
+            </Card>
+          ) : null}
+
+          <Card>
+            <Text style={styles.sectionTitle}>{t('community.news')}</Text>
+            <TextInput
+              style={[styles.input, styles.multiline]}
+              value={homeInput}
+              onChangeText={setHomeInput}
+              placeholder={t('community.sharePlaceholder')}
+              placeholderTextColor={theme.colors.muted}
+              multiline
+            />
             <View style={styles.row}>
-              <TextInput
-                style={[styles.input, styles.inputCompact]}
-                value={dmInput}
-                onChangeText={setDmInput}
-                placeholder="Message prive"
-                placeholderTextColor={theme.colors.muted}
-              />
-              <Pressable style={styles.btnSmall} onPress={sendDM}>
-                <Text style={styles.btnSmallLabel}>Envoyer</Text>
+              <Pressable style={styles.actionBtn} onPress={() => sendChannelMessage('france', homeInput, setHomeInput)}>
+                <Text style={styles.actionBtnText}>{t('community.postFrance')}</Text>
+              </Pressable>
+              <Pressable style={styles.secondaryBtn} onPress={() => sendChannelMessage(selectedRegionalChannel, homeInput, setHomeInput)}>
+                <Text style={styles.secondaryBtnText}>{t('community.postRegional')}</Text>
               </Pressable>
             </View>
-          </>
-        ) : (
-          <Text style={styles.sub}>Selectionne un ami pour ouvrir la messagerie.</Text>
-        )}
+              <View style={styles.feedList}>
+                {homeFeed.map((item, index) => (
+                  <PostCard key={messageKey(item, index, 'home')} item={item} mine={item.senderId === user.id} t={t} />
+                ))}
+                {homeFeed.length === 0 ? <Text style={styles.emptyText}>{t('community.noNews')}</Text> : null}
+              </View>
+          </Card>
+        </>
+      ) : null}
 
-        {nonFriends.length > 0 && (
-          <>
-            <Text style={[styles.sub, styles.mt]}>Ajouter des amis</Text>
-            {nonFriends.map((p) => (
-              <View key={p.id} style={styles.friendRow}>
-                <Text style={styles.friendName}>{p.displayName}</Text>
-                <Pressable style={styles.addBtn} onPress={() => addFriend(p.id)}>
-                  <Text style={styles.addBtnLabel}>Ajouter</Text>
+      {activeTab === 'regional' ? (
+        <>
+          <LinearGradient colors={['#2C6958', '#1E4E44']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.banner}>
+            <Text style={styles.bannerTitle}>{t('community.regionalBanner', { city })}</Text>
+            <Text style={styles.bannerSub}>{t('community.regionalPitch')}</Text>
+          </LinearGradient>
+
+          <Card>
+            <TextInput
+              style={[styles.input, styles.multiline]}
+              value={regionalInput}
+              onChangeText={setRegionalInput}
+              placeholder={t('community.publishInCity', { city })}
+              placeholderTextColor={theme.colors.muted}
+              multiline
+            />
+            <Pressable style={styles.actionBtn} onPress={() => sendChannelMessage(selectedRegionalChannel, regionalInput, setRegionalInput)}>
+              <Text style={styles.actionBtnText}>{t('community.publish')}</Text>
+            </Pressable>
+          </Card>
+
+          <View style={styles.feedList}>
+            {regionalFeed.map((item, index) => (
+              <PostCard key={messageKey(item, index, 'regional')} item={item} mine={item.senderId === user.id} t={t} />
+            ))}
+            {regionalFeed.length === 0 ? <Text style={styles.emptyText}>{t('community.regionalEmpty')}</Text> : null}
+          </View>
+        </>
+      ) : null}
+
+      {activeTab === 'channels' ? (
+        <>
+          <LinearGradient colors={['#2A3E71', '#1B2F59']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.banner}>
+            <Text style={styles.bannerTitle}>{t('community.channelsTitle')}</Text>
+            <Text style={styles.bannerSub}>{t('community.channelsPitch')}</Text>
+          </LinearGradient>
+
+          <Card>
+            <Text style={styles.sectionTitle}>{t('community.chooseChannel')}</Text>
+            <View style={styles.pillsWrap}>
+              {publicChannels.map((ch) => (
+                <ChannelPill key={ch.key} label={ch.title} active={selectedChannel === ch.key} onPress={() => setSelectedChannel(ch.key)} />
+              ))}
+            </View>
+
+            <View style={styles.row}>
+                <TextInput
+                  style={[styles.input, styles.rowInput]}
+                  value={newChannelName}
+                  onChangeText={setNewChannelName}
+                  placeholder={t('community.newChannelPlaceholder')}
+                  placeholderTextColor={theme.colors.muted}
+                />
+                <Pressable style={styles.secondaryBtn} onPress={createChannel}>
+                  <Text style={styles.secondaryBtnText}>{t('community.create')}</Text>
                 </Pressable>
               </View>
-            ))}
-          </>
-        )}
-      </Card>
 
-      <Card>
-        <Text style={styles.section}>Classement local {city}</Text>
-        {(crew?.leaderboard ?? []).slice(0, 8).map((row) => (
-          <View style={styles.rankRow} key={row.userId}>
-            <Text style={styles.rankText}>#{row.rank} {row.displayName}</Text>
-            <Text style={styles.rankScore}>{row.rating}</Text>
+              <TextInput
+                style={[styles.input, styles.multiline]}
+                value={channelInput}
+                onChangeText={setChannelInput}
+                placeholder={t('community.channelMessagePlaceholder')}
+                placeholderTextColor={theme.colors.muted}
+                multiline
+              />
+              <Pressable style={styles.actionBtn} onPress={() => sendChannelMessage(selectedChannel, channelInput, setChannelInput)}>
+                <Text style={styles.actionBtnText}>{t('community.publish')}</Text>
+              </Pressable>
+            </Card>
+
+            <View style={styles.feedList}>
+              {selectedChannelFeed.map((item, index) => (
+                <PostCard key={messageKey(item, index, 'channel')} item={item} mine={item.senderId === user.id} t={t} />
+              ))}
+              {selectedChannelFeed.length === 0 ? <Text style={styles.emptyText}>{t('community.channelEmpty')}</Text> : null}
+            </View>
+          </>
+        ) : null}
+
+      {activeTab === 'clubs' ? (
+        <>
+          <LinearGradient colors={['#6D3D28', '#492B1D']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.banner}>
+            <Text style={styles.bannerTitle}>{t('community.clubsTitle')}</Text>
+            <Text style={styles.bannerSub}>{t('community.clubsPitch')}</Text>
+          </LinearGradient>
+
+          <Card>
+            <Text style={styles.sectionTitle}>{t('community.joinClub')}</Text>
+            <View style={styles.row}>
+              <TextInput
+                style={[styles.input, styles.rowInput]}
+                value={clubCode}
+                onChangeText={setClubCode}
+                placeholder={t('community.clubCode')}
+                placeholderTextColor={theme.colors.muted}
+                autoCapitalize="characters"
+              />
+              <Pressable style={styles.secondaryBtn} onPress={() => setClubQrOpen(true)}>
+                <Text style={styles.secondaryBtnText}>{t('community.scanClubQr')}</Text>
+              </Pressable>
+              <Pressable style={styles.actionBtn} onPress={joinClub}>
+                <Text style={styles.actionBtnText}>{t('community.join')}</Text>
+              </Pressable>
+            </View>
+
+            {availableClubs.length > 0 ? (
+              <View style={styles.clubList}>
+                {availableClubs.map((club) => (
+                  <View key={club.key} style={styles.clubRow}>
+                    <View>
+                      <Text style={styles.clubName}>{club.title}</Text>
+                      <Text style={styles.clubMeta}>{club.city}</Text>
+                    </View>
+                    <Text style={styles.clubState}>{club.joined ? t('community.clubJoined') : t('community.clubAvailable')}</Text>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <Text style={styles.emptyText}>{t('community.noClubForCity')}</Text>
+            )}
+          </Card>
+
+          {clubChannels.length > 0 ? (
+            <Card>
+              <Text style={styles.sectionTitle}>{t('community.myClubs')}</Text>
+              <View style={styles.pillsWrap}>
+                {clubChannels.map((ch) => (
+                  <ChannelPill key={ch.key} label={ch.title} active={selectedClubChannel === ch.key} onPress={() => setSelectedClubChannel(ch.key)} />
+                ))}
+              </View>
+
+              <TextInput
+                style={[styles.input, styles.multiline]}
+                value={clubInput}
+                onChangeText={setClubInput}
+                placeholder={t('community.clubMessagePlaceholder')}
+                placeholderTextColor={theme.colors.muted}
+                multiline
+              />
+              <Pressable style={styles.actionBtn} onPress={() => sendChannelMessage(selectedClubChannel, clubInput, setClubInput)}>
+                <Text style={styles.actionBtnText}>{t('community.publish')}</Text>
+              </Pressable>
+            </Card>
+          ) : null}
+
+          <View style={styles.feedList}>
+            {clubFeed.map((item, index) => (
+              <PostCard key={messageKey(item, index, 'club')} item={item} mine={item.senderId === user.id} t={t} />
+            ))}
+            {clubFeed.length === 0 ? <Text style={styles.emptyText}>{t('community.clubFeedEmpty')}</Text> : null}
           </View>
-        ))}
-        {(crew?.leaderboard ?? []).length === 0 && <Text style={styles.sub}>Aucun classement.</Text>}
-      </Card>
+
+          <Card>
+            <Text style={styles.sectionTitle}>{t('community.localRanking', { city })}</Text>
+            {(crew?.leaderboard ?? []).slice(0, 8).map((row) => (
+              <View key={row.userId} style={styles.rankRow}>
+                <Text style={styles.rankName}>#{row.rank} {row.displayName}</Text>
+                <Text style={styles.rankScore}>{row.rating}</Text>
+              </View>
+            ))}
+          </Card>
+        </>
+      ) : null}
+
+      <QrScannerModal
+        visible={clubQrOpen}
+        title={t('community.scanClubQr')}
+        subtitle={t('community.scanClubQrSub')}
+        onScan={onScanClubQr}
+        onClose={() => setClubQrOpen(false)}
+      />
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: 'transparent' },
-  content: { padding: 16, gap: 12, paddingBottom: 24 },
-  header: { marginBottom: 4 },
-  eyebrow: {
-    color: theme.colors.accent2,
-    fontFamily: theme.fonts.mono,
-    letterSpacing: 1,
-    fontSize: 11,
+  root: {
+    flex: 1,
+    backgroundColor: 'transparent',
   },
-  h1: {
+  content: {
+    paddingHorizontal: 14,
+    paddingTop: 8,
+    paddingBottom: 26,
+    gap: 12,
+  },
+  hero: {
+    borderRadius: 18,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(157, 185, 203, 0.35)',
+    gap: 8,
+  },
+  heroTitle: {
     color: theme.colors.text,
+    fontFamily: theme.fonts.display,
     fontSize: 36,
     lineHeight: 38,
-    fontFamily: theme.fonts.display,
   },
-  section: {
-    color: theme.colors.text,
+  heroGreeting: {
+    color: '#D9EEF9',
     fontFamily: theme.fonts.title,
-    marginBottom: 8,
-    fontSize: 16,
+    fontSize: 15,
   },
-  sub: {
-    color: theme.colors.muted,
-    marginBottom: 6,
+  heroPitch: {
+    color: '#A8C4D6',
     fontFamily: theme.fonts.body,
     fontSize: 12,
   },
-  mt: { marginTop: 8 },
-  label: { color: theme.colors.muted, marginBottom: 6, fontFamily: theme.fonts.body },
-  input: {
-    minHeight: 50,
-    borderRadius: 12,
+  heroMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  cityChip: {
+    minHeight: 32,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(8, 19, 30, 0.72)',
+    borderWidth: 1,
+    borderColor: '#3A6079',
+  },
+  cityChipText: {
+    color: '#E8F3FA',
+    fontFamily: theme.fonts.title,
+    fontSize: 11,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  cityRefreshChip: {
+    minHeight: 32,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#3A6079',
+    backgroundColor: 'rgba(8, 19, 30, 0.55)',
+  },
+  cityRefreshChipText: {
+    color: '#D3E9F7',
+    fontFamily: theme.fonts.title,
+    fontSize: 11,
+    textTransform: 'uppercase',
+  },
+  cityPicker: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  cityPreset: {
+    minHeight: 30,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#3F6581',
+    backgroundColor: 'rgba(12, 36, 51, 0.8)',
+  },
+  cityPresetActive: {
+    borderColor: theme.colors.accent,
+    backgroundColor: theme.colors.accent,
+  },
+  cityPresetText: {
+    color: '#D7EAF6',
+    fontFamily: theme.fonts.title,
+    fontSize: 11,
+  },
+  cityPresetTextActive: {
+    color: '#3A2500',
+  },
+  topTabs: {
+    flexDirection: 'row',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  topTab: {
+    minHeight: 38,
+    borderRadius: 999,
     borderWidth: 1,
     borderColor: theme.colors.line,
+    backgroundColor: theme.colors.chip,
     paddingHorizontal: 12,
-    color: theme.colors.text,
-    backgroundColor: theme.colors.bgAlt,
-    fontFamily: theme.fonts.body,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  inputCompact: {
-    flex: 1,
-    minHeight: 44,
+  topTabActive: {
+    borderColor: theme.colors.accent,
+    backgroundColor: theme.colors.accent,
+  },
+  topTabText: {
+    color: theme.colors.text,
+    fontFamily: theme.fonts.title,
+    fontSize: 11,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  topTabTextActive: {
+    color: '#3A2500',
+  },
+  banner: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(157, 185, 203, 0.25)',
+    padding: 12,
+    gap: 4,
+  },
+  bannerTitle: {
+    color: '#F1F6FA',
+    fontFamily: theme.fonts.title,
+    fontSize: 16,
+  },
+  bannerSub: {
+    color: '#C9DDEA',
+    fontFamily: theme.fonts.body,
+    fontSize: 12,
+  },
+  sectionTitle: {
+    color: theme.colors.text,
+    fontFamily: theme.fonts.title,
+    fontSize: 16,
+    marginBottom: 8,
+  },
+  friendsWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 8,
+  },
+  friendChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: theme.colors.line,
+    borderRadius: 14,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    backgroundColor: '#123349',
+  },
+  friendChipActive: {
+    borderColor: '#6A96AE',
+    backgroundColor: '#235068',
+  },
+  friendChipText: {
+    color: theme.colors.text,
+    fontFamily: theme.fonts.title,
+    fontSize: 12,
+  },
+  friendChipTextActive: {
+    color: '#E8F4FB',
+  },
+  avatar: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: '#4F7C97',
+    backgroundColor: '#1B4861',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  avatarActive: {
+    borderColor: theme.colors.accent,
+    backgroundColor: theme.colors.accent,
+  },
+  avatarText: {
+    color: '#E0F0FA',
+    fontFamily: theme.fonts.title,
+    fontSize: 10,
+  },
+  avatarTextActive: {
+    color: '#3A2500',
+  },
+  dmBox: {
+    borderWidth: 1,
+    borderColor: 'rgba(157, 185, 203, 0.28)',
+    borderRadius: 12,
+    minHeight: 120,
+    backgroundColor: 'rgba(7, 23, 34, 0.7)',
+    padding: 10,
+    gap: 8,
+  },
+  dmBubble: {
+    maxWidth: '88%',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 12,
+    gap: 4,
+  },
+  dmBubbleMine: {
+    backgroundColor: '#2A7A66',
+    alignSelf: 'flex-end',
+  },
+  dmBubbleOther: {
+    backgroundColor: '#1E455C',
+    alignSelf: 'flex-start',
+  },
+  dmBubbleText: {
+    color: '#EAF6FD',
+    fontFamily: theme.fonts.body,
+    fontSize: 13,
+  },
+  dmTime: {
+    color: '#C6DCEA',
+    fontFamily: theme.fonts.mono,
+    fontSize: 10,
+    alignSelf: 'flex-end',
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    marginTop: 8,
   },
-  channelWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
-  channelChip: {
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: '#456880',
-    backgroundColor: '#163446',
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-  },
-  channelChipActive: {
-    backgroundColor: theme.colors.accent,
-    borderColor: theme.colors.accent,
-  },
-  channelChipText: {
-    color: '#D7EBFA',
-    fontFamily: theme.fonts.title,
-    fontSize: 11,
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-  },
-  channelChipTextActive: { color: '#3A2500' },
-  messagesBox: {
-    borderWidth: 1,
-    borderColor: 'rgba(157, 185, 203, 0.25)',
-    backgroundColor: 'rgba(15, 42, 58, 0.7)',
+  input: {
+    minHeight: 48,
     borderRadius: 12,
-    padding: 10,
-    marginBottom: 8,
-    gap: 6,
+    borderWidth: 1,
+    borderColor: theme.colors.line,
+    backgroundColor: theme.colors.bgAlt,
+    color: theme.colors.text,
+    paddingHorizontal: 12,
+    fontFamily: theme.fonts.body,
+    fontSize: 14,
   },
-  messageRow: {
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(157, 185, 203, 0.18)',
-    paddingBottom: 5,
-  },
-  messageAuthor: { color: theme.colors.accent2, fontFamily: theme.fonts.title, fontSize: 11 },
-  messageText: { color: theme.colors.text, fontFamily: theme.fonts.body, fontSize: 12 },
-  btnSmall: {
-    minWidth: 92,
+  rowInput: {
+    flex: 1,
     minHeight: 44,
-    borderRadius: 10,
+  },
+  multiline: {
+    minHeight: 72,
+    textAlignVertical: 'top',
+    paddingTop: 10,
+  },
+  actionBtn: {
+    minHeight: 44,
+    minWidth: 96,
+    borderRadius: 12,
     backgroundColor: theme.colors.accent,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 10,
   },
-  btnSmallLabel: {
+  actionBtnText: {
     color: '#3A2500',
     fontFamily: theme.fonts.title,
     textTransform: 'uppercase',
     fontSize: 11,
+    letterSpacing: 0.8,
   },
-  friendRow: {
+  secondaryBtn: {
+    minHeight: 44,
+    minWidth: 92,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: theme.colors.line,
+    backgroundColor: theme.colors.bgAlt,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+  },
+  secondaryBtnText: {
+    color: theme.colors.text,
+    fontFamily: theme.fonts.title,
+    textTransform: 'uppercase',
+    fontSize: 11,
+    letterSpacing: 0.8,
+  },
+  suggestRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 6,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(157, 185, 203, 0.15)',
+    borderBottomColor: 'rgba(157, 185, 203, 0.18)',
+    paddingVertical: 8,
+    gap: 8,
   },
-  friendName: { color: theme.colors.text, fontFamily: theme.fonts.body },
+  suggestLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+  },
+  suggestName: {
+    color: theme.colors.text,
+    fontFamily: theme.fonts.title,
+    fontSize: 14,
+  },
+  suggestMeta: {
+    color: theme.colors.muted,
+    fontFamily: theme.fonts.body,
+    fontSize: 11,
+  },
   addBtn: {
     minHeight: 32,
     borderRadius: 8,
@@ -316,14 +1028,129 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 10,
   },
-  addBtnLabel: { color: '#ECFFF9', fontFamily: theme.fonts.title, fontSize: 10, textTransform: 'uppercase' },
+  addBtnText: {
+    color: '#ECFFF9',
+    fontFamily: theme.fonts.title,
+    fontSize: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 0.7,
+  },
+  feedList: {
+    gap: 8,
+  },
+  postCard: {
+    borderRadius: 14,
+    padding: 10,
+    gap: 8,
+  },
+  postHead: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  postAuthorWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  postAuthor: {
+    color: theme.colors.text,
+    fontFamily: theme.fonts.title,
+    fontSize: 13,
+  },
+  postMeta: {
+    color: theme.colors.muted,
+    fontFamily: theme.fonts.body,
+    fontSize: 11,
+  },
+  postText: {
+    color: theme.colors.text,
+    fontFamily: theme.fonts.body,
+    fontSize: 14,
+    lineHeight: 18,
+  },
+  pillsWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 8,
+  },
+  channelPill: {
+    borderWidth: 1,
+    borderColor: theme.colors.line,
+    backgroundColor: '#13344A',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  channelPillActive: {
+    borderColor: theme.colors.accent,
+    backgroundColor: theme.colors.accent,
+  },
+  channelPillText: {
+    color: '#D8EBF8',
+    fontFamily: theme.fonts.title,
+    fontSize: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 0.7,
+  },
+  channelPillTextActive: {
+    color: '#3A2500',
+  },
+  clubList: {
+    marginTop: 8,
+    gap: 6,
+  },
+  clubRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 7,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(157, 185, 203, 0.18)',
+  },
+  clubName: {
+    color: theme.colors.text,
+    fontFamily: theme.fonts.title,
+    fontSize: 13,
+  },
+  clubMeta: {
+    color: theme.colors.muted,
+    fontFamily: theme.fonts.body,
+    fontSize: 11,
+  },
+  clubState: {
+    color: theme.colors.accent,
+    fontFamily: theme.fonts.mono,
+    fontSize: 11,
+  },
   rankRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'center',
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(157, 185, 203, 0.15)',
-    paddingVertical: 6,
+    borderBottomColor: 'rgba(157, 185, 203, 0.17)',
+    paddingVertical: 7,
   },
-  rankText: { color: theme.colors.text, fontFamily: theme.fonts.title },
-  rankScore: { color: theme.colors.accent, fontFamily: theme.fonts.mono },
+  rankName: {
+    color: theme.colors.text,
+    fontFamily: theme.fonts.title,
+    fontSize: 13,
+  },
+  rankScore: {
+    color: theme.colors.accent,
+    fontFamily: theme.fonts.mono,
+    fontSize: 12,
+  },
+  emptyText: {
+    color: theme.colors.muted,
+    fontFamily: theme.fonts.body,
+    fontSize: 12,
+    marginTop: 4,
+  },
+  error: {
+    color: theme.colors.danger,
+    fontFamily: theme.fonts.body,
+    fontSize: 12,
+  },
 });

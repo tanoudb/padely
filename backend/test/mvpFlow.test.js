@@ -38,7 +38,8 @@ test('end-to-end mvp flow: register, create match, validate and compute stats', 
   await validateMatch({ matchId: match.id, userId: u2.id, accepted: true });
   const listAfterVote = await listMatchesForUser(u2.id);
   assert.equal(listAfterVote[0].canValidate, false);
-  const validated = await validateMatch({ matchId: match.id, userId: u3.id, accepted: true });
+  await validateMatch({ matchId: match.id, userId: u3.id, accepted: true });
+  const validated = await validateMatch({ matchId: match.id, userId: u4.id, accepted: true });
 
   assert.equal(validated.status, 'validated');
 

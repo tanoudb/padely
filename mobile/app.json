@@ -3,19 +3,65 @@
     "name": "Padely",
     "slug": "padely",
     "version": "0.1.0",
+    "scheme": "padely",
+    "icon": "./assets/icon.png",
     "orientation": "all",
     "userInterfaceStyle": "dark",
+    "jsEngine": "hermes",
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Padely utilise ta localisation pour afficher automatiquement ton canal regional."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Padely utilise la camera pour scanner les QR joueurs et clubs."
+        }
+      ],
+      "expo-notifications"
+    ],
     "splash": {
+      "image": "./assets/splash.png",
       "resizeMode": "contain",
       "backgroundColor": "#0D1320"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.tanoudb.padely",
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true
+        },
+        "NSLocationWhenInUseUsageDescription": "Padely utilise ta localisation pour afficher automatiquement ton canal regional.",
+        "NSCameraUsageDescription": "Padely utilise la camera pour scanner les QR joueurs et clubs.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
+      "package": "com.tanoudb.padely",
+      "usesCleartextTraffic": true,
       "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-foreground.png",
         "backgroundColor": "#0D1320"
+      },
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "bfd7cae3-b982-4e2e-829f-d4ffa6d443c2"
       }
-    }
+    },
+    "owner": "tanoudb"
   }
 }

@@ -10,26 +10,16 @@ import {
   View,
 } from 'react-native';
 import { Card } from '../components/Card';
+import { useI18n } from '../state/i18n';
 import { Backdrop } from '../components/Backdrop';
 import { useSession } from '../state/session';
 import { theme } from '../theme';
 
-const LEVEL_DESCRIPTIONS = {
-  1: 'Debutant absolu',
-  2: 'Bases en cours',
-  3: 'Echanges simples',
-  4: 'Jeu complet',
-  5: 'Jeu structure',
-  6: 'Competition locale',
-  7: 'Competition regionale',
-  8: 'Niveau elite',
-};
-
 const QUIZ = [
-  { key: 'vitres', label: 'Utilisation des vitres' },
-  { key: 'filet', label: 'Montee au filet' },
-  { key: 'tournoi', label: 'Experience tournoi' },
-  { key: 'technique', label: 'Maitrise technique' },
+  { key: 'vitres', i18n: 'auth.quizVitres' },
+  { key: 'filet', i18n: 'auth.quizFilet' },
+  { key: 'tournoi', i18n: 'auth.quizTournoi' },
+  { key: 'technique', i18n: 'auth.quizTechnique' },
 ];
 
 function inferLevelFromQuiz(answers) {
@@ -44,7 +34,8 @@ function inferLevelFromQuiz(answers) {
 }
 
 export function AuthScreen() {
-  const { login, register, verifyEmail, pendingVerification } = useSession();
+  const { login, register, verifyEmail, resendVerificationCode, pendingVerification } = useSession();
+  const { t, language, setLanguage } = useI18n();
   const [isRegister, setIsRegister] = useState(false);
   const [email, setEmail] = useState('alice@padely.app');
   const [password, setPassword] = useState('padely2026');
@@ -56,19 +47,29 @@ export function AuthScreen() {
   const [error, setError] = useState('');
 
   const quizReady = useMemo(() => QUIZ.every((q) => quizAnswers[q.key]), [quizAnswers]);
+  const levelDescriptions = useMemo(() => ({
+    1: t('auth.level1'),
+    2: t('auth.level2'),
+    3: t('auth.level3'),
+    4: t('auth.level4'),
+    5: t('auth.level5'),
+    6: t('auth.level6'),
+    7: t('auth.level7'),
+    8: t('auth.level8'),
+  }), [t]);
 
   useEffect(() => {
-    if (pendingVerification?.verificationToken) {
-      setVerificationCode(pendingVerification.verificationToken);
+    if (pendingVerification?.devCode) {
+      setVerificationCode(pendingVerification.devCode);
     }
-  }, [pendingVerification?.verificationToken]);
+  }, [pendingVerification?.devCode]);
 
   async function submit() {
     setError('');
     try {
       if (isRegister) {
         if (unknownLevel && !quizReady) {
-          throw new Error('Complete le quiz pour estimer ton niveau.');
+          throw new Error(t('auth.msgCompleteQuiz'));
         }
 
         const finalLevel = unknownLevel ? inferLevelFromQuiz(quizAnswers) : level;
@@ -82,7 +83,7 @@ export function AuthScreen() {
           }
         );
         if (out.requiresEmailVerification) {
-          setError('Email envoye. Valide ton compte avec le code/lien de verification.');
+          setError(t('auth.msgCodeSent'));
         }
       } else {
         await login(email.trim(), password);
@@ -101,6 +102,23 @@ export function AuthScreen() {
     }
   }
 
+  async function resendCode() {
+    setError('');
+    try {
+      const out = await resendVerificationCode();
+      if (out.alreadyVerified) {
+        setError(t('auth.msgAlreadyVerified'));
+        return;
+      }
+      if (out.devCode) {
+        setVerificationCode(out.devCode);
+      }
+      setError(t('auth.msgCodeResent'));
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
   return (
     <View style={styles.root}>
       <Backdrop />
@@ -111,64 +129,103 @@ export function AuthScreen() {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.hero}>
-            <Text style={styles.kicker}>SYSTEME D IMPACT PADEL</Text>
+            <View style={styles.langRow}>
+              <Pressable
+                style={[styles.langBtn, language === 'fr' && styles.langBtnActive]}
+                onPress={() => setLanguage('fr')}
+              >
+                <Text style={[styles.langBtnText, language === 'fr' && styles.langBtnTextActive]}>FR</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.langBtn, language === 'en' && styles.langBtnActive]}
+                onPress={() => setLanguage('en')}
+              >
+                <Text style={[styles.langBtnText, language === 'en' && styles.langBtnTextActive]}>EN</Text>
+              </Pressable>
+            </View>
+            <Text style={styles.kicker}>{t('app.splashKicker')}</Text>
             <Text style={styles.title}>PADELY</Text>
-            <Text style={styles.subtitle}>Ton niveau n est plus un chiffre. C est un ADN.</Text>
+            <Text style={styles.subtitle}>{t('auth.subtitle')}</Text>
+            <View style={styles.featureRow}>
+              <Text style={styles.featureChip}>{t('auth.featureLive')}</Text>
+              <Text style={styles.featureChip}>{t('auth.featurePir')}</Text>
+              <Text style={styles.featureChip}>{t('auth.featureCommunity')}</Text>
+            </View>
           </View>
 
           <Card style={styles.form} elevated>
             {pendingVerification ? (
               <View style={styles.verifyBox}>
-                <Text style={styles.verifyTitle}>Verification email en attente</Text>
+                <Text style={styles.verifyTitle}>{t('auth.verifyPending')}</Text>
                 <Text style={styles.verifyText}>
-                  Compte: {pendingVerification.email}
+                  {t('auth.account', { email: pendingVerification.maskedEmail ?? pendingVerification.email })}
+                </Text>
+                <Text style={styles.verifyMeta}>
+                  {t('auth.otpMeta', { minutes: pendingVerification.expiresInMinutes ?? 15 })}
+                </Text>
+                <Text style={styles.verifyMeta}>
+                  {t('auth.emailChannel', {
+                    provider: pendingVerification.verificationProvider === 'none'
+                      ? t('auth.notConfigured')
+                      : pendingVerification.verificationProvider,
+                  })}
                 </Text>
                 <TextInput
                   value={verificationCode}
                   onChangeText={setVerificationCode}
                   style={styles.input}
-                  placeholder="Token de verification"
+                  placeholder={t('auth.otpPlaceholder')}
                   placeholderTextColor={theme.colors.muted}
-                  autoCapitalize="none"
+                  keyboardType="number-pad"
+                  maxLength={6}
                 />
-                <Pressable style={styles.verifyBtn} onPress={submitVerification}>
-                  <Text style={styles.verifyBtnText}>Valider mon email</Text>
-                </Pressable>
-                {!!pendingVerification.verificationUrl && (
-                  <Text style={styles.hint}>Lien dev: {pendingVerification.verificationUrl}</Text>
+                <View style={styles.verifyActions}>
+                  <Pressable style={[styles.verifyBtn, styles.verifyBtnMain]} onPress={submitVerification}>
+                    <Text style={styles.verifyBtnText}>{t('auth.verifyEmail')}</Text>
+                  </Pressable>
+                  <Pressable style={styles.resendBtn} onPress={resendCode}>
+                    <Text style={styles.resendBtnText}>{t('auth.resend')}</Text>
+                  </Pressable>
+                </View>
+                {pendingVerification.devCode ? (
+                  <Text style={styles.hint}>{t('auth.devCode', { code: pendingVerification.devCode })}</Text>
+                ) : (
+                  <Text style={styles.hint}>{t('auth.spamHint')}</Text>
                 )}
               </View>
             ) : null}
 
             <View style={styles.switch}>
               <Pressable style={[styles.switchBtn, !isRegister && styles.switchBtnActive]} onPress={() => setIsRegister(false)}>
-                <Text style={[styles.switchLabel, !isRegister && styles.switchLabelActive]}>Connexion</Text>
+                <Text style={[styles.switchLabel, !isRegister && styles.switchLabelActive]}>{t('auth.login')}</Text>
               </Pressable>
               <Pressable style={[styles.switchBtn, isRegister && styles.switchBtnActive]} onPress={() => setIsRegister(true)}>
-                <Text style={[styles.switchLabel, isRegister && styles.switchLabelActive]}>Inscription</Text>
+                <Text style={[styles.switchLabel, isRegister && styles.switchLabelActive]}>{t('auth.register')}</Text>
               </Pressable>
             </View>
 
-            <TextInput value={email} onChangeText={setEmail} autoCapitalize="none" style={styles.input} placeholder="Email" placeholderTextColor={theme.colors.muted} />
-            <TextInput value={password} onChangeText={setPassword} secureTextEntry style={styles.input} placeholder="Mot de passe" placeholderTextColor={theme.colors.muted} />
+            <TextInput value={email} onChangeText={setEmail} autoCapitalize="none" style={styles.input} placeholder={t('auth.email')} placeholderTextColor={theme.colors.muted} />
+            <TextInput value={password} onChangeText={setPassword} secureTextEntry style={styles.input} placeholder={t('auth.password')} placeholderTextColor={theme.colors.muted} />
 
             {isRegister ? (
               <>
-                <TextInput value={displayName} onChangeText={setDisplayName} style={styles.input} placeholder="Nom affiche" placeholderTextColor={theme.colors.muted} />
+                <TextInput value={displayName} onChangeText={setDisplayName} style={styles.input} placeholder={t('auth.displayName')} placeholderTextColor={theme.colors.muted} />
 
                 <View style={styles.optionRow}>
-                  <Text style={styles.optionLabel}>Je ne connais pas mon niveau</Text>
+                  <Text style={styles.optionLabel}>{t('auth.unknownLevel')}</Text>
                   <Pressable
                     style={[styles.smallToggle, unknownLevel && styles.smallToggleActive]}
                     onPress={() => setUnknownLevel((v) => !v)}
                   >
-                    <Text style={[styles.smallToggleText, unknownLevel && styles.smallToggleTextActive]}>{unknownLevel ? 'Oui' : 'Non'}</Text>
+                    <Text style={[styles.smallToggleText, unknownLevel && styles.smallToggleTextActive]}>
+                      {unknownLevel ? t('auth.yes') : t('auth.no')}
+                    </Text>
                   </Pressable>
                 </View>
 
                 {!unknownLevel ? (
                   <>
-                    <Text style={styles.cardLabel}>Niveau (1 a 8)</Text>
+                    <Text style={styles.cardLabel}>{t('auth.levelLabel')}</Text>
                     <View style={styles.levelGrid}>
                       {[1, 2, 3, 4, 5, 6, 7, 8].map((value) => (
                         <Pressable
@@ -180,14 +237,14 @@ export function AuthScreen() {
                         </Pressable>
                       ))}
                     </View>
-                    <Text style={styles.hint}>{LEVEL_DESCRIPTIONS[level]}</Text>
+                    <Text style={styles.hint}>{levelDescriptions[level]}</Text>
                   </>
                 ) : (
                   <>
-                    <Text style={styles.cardLabel}>Quiz d auto-evaluation (1 a 5)</Text>
+                    <Text style={styles.cardLabel}>{t('auth.quizLabel')}</Text>
                     {QUIZ.map((q) => (
                       <View key={q.key} style={styles.quizRow}>
-                        <Text style={styles.quizLabel}>{q.label}</Text>
+                        <Text style={styles.quizLabel}>{t(q.i18n)}</Text>
                         <View style={styles.quizOptions}>
                           {[1, 2, 3, 4, 5].map((value) => {
                             const active = Number(quizAnswers[q.key]) === value;
@@ -204,7 +261,7 @@ export function AuthScreen() {
                         </View>
                       </View>
                     ))}
-                    <Text style={styles.hint}>Niveau estime: {inferLevelFromQuiz(quizAnswers)} / 8</Text>
+                    <Text style={styles.hint}>{t('auth.quizEstimated', { level: inferLevelFromQuiz(quizAnswers) })}</Text>
                   </>
                 )}
               </>
@@ -213,10 +270,10 @@ export function AuthScreen() {
             {error ? <Text style={styles.error}>{error}</Text> : null}
 
             <Pressable style={styles.cta} onPress={submit}>
-              <Text style={styles.ctaLabel}>{isRegister ? 'Creer mon profil' : 'Entrer dans l espace de jeu'}</Text>
+              <Text style={styles.ctaLabel}>{isRegister ? t('auth.createProfile') : t('auth.enter')}</Text>
             </Pressable>
 
-            <Text style={styles.hint}>Compte test: alice@padely.app / padely2026</Text>
+            <Text style={styles.hint}>{t('auth.testAccount')}</Text>
           </Card>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -241,6 +298,36 @@ const styles = StyleSheet.create({
   hero: {
     marginBottom: 6,
   },
+  langRow: {
+    flexDirection: 'row',
+    alignSelf: 'flex-end',
+    gap: 6,
+    marginBottom: 8,
+  },
+  langBtn: {
+    minHeight: 28,
+    minWidth: 46,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#4E6F87',
+    backgroundColor: 'rgba(18, 51, 72, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  langBtnActive: {
+    borderColor: '#F4D35E',
+    backgroundColor: '#F4D35E',
+  },
+  langBtnText: {
+    color: '#D8EBFA',
+    fontFamily: theme.fonts.title,
+    fontSize: 11,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  langBtnTextActive: {
+    color: '#3A2500',
+  },
   kicker: {
     color: theme.colors.accent2,
     fontFamily: theme.fonts.mono,
@@ -259,6 +346,25 @@ const styles = StyleSheet.create({
     fontFamily: theme.fonts.body,
     fontSize: 14,
     marginTop: 2,
+  },
+  featureRow: {
+    marginTop: 8,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  featureChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#4A6E86',
+    backgroundColor: 'rgba(18, 51, 72, 0.66)',
+    color: '#D8EBFA',
+    fontFamily: theme.fonts.title,
+    fontSize: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   form: {
     gap: 10,
@@ -282,15 +388,45 @@ const styles = StyleSheet.create({
     fontFamily: theme.fonts.body,
     fontSize: 12,
   },
+  verifyMeta: {
+    color: theme.colors.text,
+    fontFamily: theme.fonts.body,
+    fontSize: 11,
+  },
+  verifyActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   verifyBtn: {
     minHeight: 44,
     borderRadius: 10,
-    backgroundColor: '#2E6F5E',
     justifyContent: 'center',
     alignItems: 'center',
   },
+  verifyBtnMain: {
+    flex: 1,
+    backgroundColor: '#2E6F5E',
+  },
   verifyBtnText: {
     color: '#ECFFF9',
+    fontFamily: theme.fonts.title,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    fontSize: 11,
+  },
+  resendBtn: {
+    minHeight: 44,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: theme.colors.line,
+    backgroundColor: theme.colors.bgAlt,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+  },
+  resendBtnText: {
+    color: theme.colors.text,
     fontFamily: theme.fonts.title,
     textTransform: 'uppercase',
     letterSpacing: 0.8,

@@ -181,12 +181,198 @@ function createEnginePlayer(slot, watch, usersById, partnerSlot, pairRating) {
   };
 }
 
+function normalizeMatchFormat(value) {
+  const format = String(value ?? '').toLowerCase();
+  if (format === 'club' || format === 'marathon' || format === 'standard') {
+    return format;
+  }
+  return 'standard';
+}
+
+function scoringRulesForFormat(matchFormat) {
+  if (matchFormat === 'club') {
+    return {
+      setsToWin: 2,
+      gamesToWinSet: 6,
+      tieBreakAt: 6,
+      noTieBreakInDecidingSet: false,
+      decidingSetMode: 'super_tiebreak',
+    };
+  }
+
+  if (matchFormat === 'marathon') {
+    return {
+      setsToWin: 3,
+      gamesToWinSet: 4,
+      tieBreakAt: 3,
+      noTieBreakInDecidingSet: false,
+      decidingSetMode: 'full_set',
+    };
+  }
+
+  return {
+    setsToWin: 2,
+    gamesToWinSet: 6,
+    tieBreakAt: 6,
+    noTieBreakInDecidingSet: false,
+    decidingSetMode: 'full_set',
+  };
+}
+
+function winnerOfSet(set) {
+  if (set.a > set.b) return 'A';
+  if (set.b > set.a) return 'B';
+  return null;
+}
+
+function validateSetShape(set, index) {
+  if (!set || typeof set !== 'object') {
+    throw new Error(`Set ${index + 1} is invalid`);
+  }
+
+  const a = Number(set.a);
+  const b = Number(set.b);
+
+  if (!Number.isInteger(a) || !Number.isInteger(b) || a < 0 || b < 0) {
+    throw new Error(`Set ${index + 1} must use non-negative integer games`);
+  }
+
+  if (a === b) {
+    throw new Error(`Set ${index + 1} cannot end in a draw`);
+  }
+}
+
+function isValidSetScore(set, { gamesToWinSet, tieBreakAt, tieBreakEnabled }) {
+  const winnerGames = Math.max(set.a, set.b);
+  const loserGames = Math.min(set.a, set.b);
+  const diff = winnerGames - loserGames;
+
+  if (tieBreakEnabled) {
+    const regularWin = winnerGames === gamesToWinSet && loserGames <= gamesToWinSet - 2 && diff >= 2;
+    const tieBreakWin = winnerGames === (tieBreakAt + 1) && loserGames === tieBreakAt;
+    return regularWin || tieBreakWin;
+  }
+
+  return winnerGames >= gamesToWinSet && diff >= 2;
+}
+
+function validateSetsByFormat(sets, matchFormat) {
+  if (!Array.isArray(sets) || sets.length === 0) {
+    throw new Error('At least one completed set is required');
+  }
+
+  const rules = scoringRulesForFormat(matchFormat);
+  const maxSets = (rules.setsToWin * 2) - 1;
+  if (sets.length > maxSets) {
+    throw new Error(`Too many sets for format ${matchFormat}`);
+  }
+
+  let setsWonA = 0;
+  let setsWonB = 0;
+
+  for (let index = 0; index < sets.length; index += 1) {
+    if (setsWonA >= rules.setsToWin || setsWonB >= rules.setsToWin) {
+      throw new Error('Extra sets were provided after match winner was already decided');
+    }
+
+    const set = sets[index];
+    validateSetShape(set, index);
+
+    const decidingSetIndex = maxSets - 1;
+    const isDecidingSet = index === decidingSetIndex;
+
+    if (isDecidingSet && rules.decidingSetMode === 'super_tiebreak') {
+      const winnerGames = Math.max(set.a, set.b);
+      const loserGames = Math.min(set.a, set.b);
+      if (!(winnerGames === 1 && loserGames === 0)) {
+        throw new Error(`Set ${index + 1} must be recorded as 1-0 or 0-1 in super tie-break mode`);
+      }
+    } else {
+      const tieBreakEnabled = !(rules.noTieBreakInDecidingSet && isDecidingSet);
+      if (!isValidSetScore(set, {
+        gamesToWinSet: rules.gamesToWinSet,
+        tieBreakAt: rules.tieBreakAt,
+        tieBreakEnabled,
+      })) {
+        if (rules.gamesToWinSet === 4) {
+          throw new Error(`Set ${index + 1} is invalid for short-set rules (3-3 must go to tie-break, final set score 4-3)`);
+        }
+        throw new Error(`Set ${index + 1} is invalid for format ${matchFormat}`);
+      }
+    }
+
+    const setWinner = winnerOfSet(set);
+    if (setWinner === 'A') {
+      setsWonA += 1;
+    } else if (setWinner === 'B') {
+      setsWonB += 1;
+    }
+  }
+
+  if (setsWonA < rules.setsToWin && setsWonB < rules.setsToWin) {
+    throw new Error('Provided sets do not contain a finished match winner');
+  }
+}
+
+function containsGuest(teamSlots) {
+  return teamSlots.some((slot) => slot.kind === 'guest');
+}
+
+function findPlayerUpdateById(ratingResult, userId) {
+  return [...(ratingResult?.teamA ?? []), ...(ratingResult?.teamB ?? [])]
+    .find((item) => item.id === userId);
+}
+
+function toSigned(value) {
+  const num = Number(value ?? 0);
+  if (num > 0) return `+${num.toFixed(2)}`;
+  return num.toFixed(2);
+}
+
+function buildPirImpact(match, userId) {
+  if (!match?.ratingResult || match.mode !== 'ranked') {
+    return null;
+  }
+
+  const update = findPlayerUpdateById(match.ratingResult, userId);
+  if (!update) {
+    return null;
+  }
+
+  const reasons = [
+    `Base: ${toSigned(update.breakdown?.base)}`,
+    `Domination: x${Number(update.breakdown?.dominationMultiplier ?? 1).toFixed(2)}`,
+    `Clutch: ${toSigned(update.breakdown?.clutch)}`,
+    `Combativite: ${toSigned(update.breakdown?.combativite)}`,
+    `Upset: ${toSigned(update.breakdown?.upset)}`,
+    `Leadership: ${toSigned(update.breakdown?.leadership)}`,
+    `Protection defaite: ${toSigned(update.breakdown?.lossProtection)}`,
+  ];
+
+  return {
+    delta: update.delta,
+    before: update.previousRating,
+    after: update.newRating,
+    pir: update.pir?.pir ?? null,
+    pairDelta: update.pairDelta,
+    reasons,
+    breakdown: update.breakdown ?? {},
+  };
+}
+
 export async function createMatch(payload, createdBy) {
   const { teamA, teamB } = normalizeTeams(payload.teamA, payload.teamB);
+  const matchFormat = normalizeMatchFormat(payload.matchFormat);
+  validateSetsByFormat(payload.sets, matchFormat);
   const userIds = extractUserIds(teamA, teamB);
+  const mode = payload.mode === 'friendly' ? 'friendly' : 'ranked';
 
   if (!userIds.includes(createdBy)) {
     throw new Error('Creator must be one of the match players');
+  }
+
+  if (mode === 'ranked' && (containsGuest(teamA) || containsGuest(teamB))) {
+    throw new Error('Ranked mode only accepts registered players');
   }
 
   const uniqueUsers = new Set(userIds);
@@ -208,16 +394,9 @@ export async function createMatch(payload, createdBy) {
   };
 
   const splitCost = Number((billing.totalCostEur / 4).toFixed(2));
-  const mode = payload.mode === 'friendly' ? 'friendly' : 'ranked';
-  const validationMode = payload.validationMode === 'rapide' ? 'rapide' : 'standard';
-  const rawPendingValidators = mode === 'friendly'
-    ? []
-    : (validationMode === 'standard'
-      ? userIds.filter((id) => id !== createdBy)
-      : userIds);
-  const requiredValidations = mode === 'friendly'
-    ? 0
-    : Math.min(rawPendingValidators.length, validationMode === 'standard' ? 2 : 1);
+  const validationMode = mode === 'ranked' ? 'cross' : 'friendly';
+  const rawPendingValidators = mode === 'friendly' ? [] : userIds.filter((id) => id !== createdBy);
+  const requiredValidations = mode === 'friendly' ? 0 : rawPendingValidators.length;
   const pendingValidators = rawPendingValidators;
 
   const created = await store.createMatch({
@@ -231,6 +410,7 @@ export async function createMatch(payload, createdBy) {
       teamB,
     },
     players: userIds,
+    matchFormat,
     sets: payload.sets ?? [],
     goldenPoints: payload.goldenPoints ?? { teamA: 0, teamB: 0 },
     watchByPlayer,
@@ -262,23 +442,6 @@ export async function createMatch(payload, createdBy) {
       },
       validatedAt: new Date().toISOString(),
     });
-  }
-
-  if (validationMode === 'rapide') {
-    await store.createValidation({ matchId: created.id, userId: createdBy, accepted: true });
-    const updated = await store.updateMatch(created.id, {
-      validation: {
-        ...created.validation,
-        accepted: 1,
-        rejected: 0,
-        pendingValidators: pendingValidators.filter((id) => id !== createdBy),
-      },
-    });
-
-    if (updated.validation.accepted >= updated.validation.required) {
-      return rateValidatedMatch(created.id);
-    }
-    return updated;
   }
 
   if (requiredValidations === 0) {
@@ -330,7 +493,7 @@ export async function validateMatch({ matchId, userId, accepted }) {
     },
   });
 
-  if (rejectedCount >= 2) {
+  if (rejectedCount >= 1) {
     return store.updateMatch(matchId, {
       status: 'rejected',
     });
@@ -474,6 +637,9 @@ export async function getMatch(matchId) {
   return {
     ...match,
     validations: await store.listValidations(matchId),
+    pirImpactByPlayer: Object.fromEntries(
+      (match.players ?? []).map((playerId) => [playerId, buildPirImpact(match, playerId)]),
+    ),
   };
 }
 
@@ -493,6 +659,7 @@ export async function listMatchesForUser(userId, { status } = {}) {
       ...match,
       validations,
       canValidate,
+      pirImpact: buildPirImpact(match, userId),
     });
   }
 

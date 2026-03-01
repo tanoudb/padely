@@ -4,8 +4,10 @@ import {
   computeCombativiteBonus,
   computeDominationMultiplier,
   computeLeadershipBonus,
+  computeLossProtection,
   computePairDelta,
   computePillars,
+  computeUpsetBonus,
 } from '../domain/pir.js';
 import { round } from '../domain/math.js';
 
@@ -35,6 +37,12 @@ function matchWinner(sets) {
 function closeLoss(sets) {
   const margin = Math.abs(gamesWon(sets, 'a') - gamesWon(sets, 'b'));
   return margin <= 3;
+}
+
+function gameDifference(sets, team) {
+  const own = gamesWon(sets, team === 'A' ? 'a' : 'b');
+  const opp = gamesWon(sets, team === 'A' ? 'b' : 'a');
+  return own - opp;
 }
 
 export function evaluateMatch(payload) {
@@ -69,6 +77,16 @@ export function evaluateMatch(payload) {
     const baseDelta = baseK * domination * (actual - expected);
     const clutchDelta = didTeamWin ? clutchTeamBonus : 0;
     const leadershipDelta = computeLeadershipBonus(player.rating, partner.rating, didTeamWin);
+    const upsetDelta = computeUpsetBonus({
+      playerTeamRating: expected === expectedA ? teamARating : teamBRating,
+      opponentTeamRating: expected === expectedA ? teamBRating : teamARating,
+      didWin: didTeamWin,
+    });
+    const lossProtection = computeLossProtection({
+      expectedWin: expected,
+      didWin: didTeamWin,
+      gameDiff: gameDifference(payload.sets, expected === expectedA ? 'A' : 'B'),
+    });
 
     const combativiteDelta = computeCombativiteBonus({
       isUnderdog: teamUnderdog,
@@ -78,7 +96,7 @@ export function evaluateMatch(payload) {
       intensityScore: player.watch?.intensityScore ?? 0,
     });
 
-    const totalDelta = round(baseDelta + clutchDelta + leadershipDelta + combativiteDelta, 2);
+    const totalDelta = round(baseDelta + clutchDelta + leadershipDelta + upsetDelta + combativiteDelta + lossProtection, 2);
 
     const pairRating = player.pairRating ?? player.rating;
     const opponentPairRating = expected === expectedA ? teamBRating : teamARating;
@@ -115,6 +133,8 @@ export function evaluateMatch(payload) {
         dominationMultiplier: domination,
         clutch: clutchDelta,
         leadership: leadershipDelta,
+        upset: upsetDelta,
+        lossProtection,
         combativite: combativiteDelta,
       },
       pairRatingBefore: pairRating,

@@ -1,5 +1,14 @@
+import crypto from 'node:crypto';
 import { store } from '../store/index.js';
 import { hashPassword, newToken, verifyPassword } from '../utils/security.js';
+
+const SESSION_TTL_HOURS = Math.max(1, Number(process.env.SESSION_TTL_HOURS ?? 72));
+const SESSION_TTL_MS = SESSION_TTL_HOURS * 60 * 60 * 1000;
+const EMAIL_CODE_LENGTH = 6;
+const EMAIL_CODE_TTL_MIN = Math.max(5, Number(process.env.EMAIL_CODE_TTL_MIN ?? 15));
+const EMAIL_CODE_TTL_MS = EMAIL_CODE_TTL_MIN * 60 * 1000;
+const IS_PROD = process.env.NODE_ENV === 'production';
+const EXPOSE_DEV_EMAIL_CODE = process.env.EXPOSE_DEV_EMAIL_CODE === 'true';
 
 function sanitizeUser(user) {
   if (!user) {
@@ -22,6 +31,23 @@ function parseJwtPayload(token) {
   } catch {
     return null;
   }
+}
+
+function normalizeEmail(email) {
+  return String(email ?? '').trim().toLowerCase();
+}
+
+function newEmailCode() {
+  return String(crypto.randomInt(0, 10 ** EMAIL_CODE_LENGTH)).padStart(EMAIL_CODE_LENGTH, '0');
+}
+
+function maskEmail(email) {
+  const [local, domain] = normalizeEmail(email).split('@');
+  if (!local || !domain) {
+    return '***';
+  }
+  const safeLocal = local.length <= 2 ? `${local[0] ?? '*'}*` : `${local.slice(0, 2)}***`;
+  return `${safeLocal}@${domain}`;
 }
 
 function oauthFallbackPayload(provider, idToken, email, displayName) {
@@ -97,18 +123,52 @@ async function verifyOAuthIdentity({ provider, idToken, email, displayName }) {
   }
 }
 
-async function sendEmailVerificationLink({ email, token }) {
+async function sendEmailVerificationCode({ email, code, token }) {
   const verifyBaseUrl = process.env.VERIFY_BASE_URL ?? 'http://127.0.0.1:8787/api/v1/auth/verify';
   const verificationUrl = `${verifyBaseUrl}?token=${encodeURIComponent(token)}`;
-  const from = process.env.EMAIL_FROM ?? 'no-reply@padely.app';
+  const from = process.env.EMAIL_FROM ?? 'Padely <onboarding@resend.dev>';
   const smtpHost = process.env.SMTP_HOST;
   const smtpPort = process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : 587;
   const smtpUser = process.env.SMTP_USER;
   const smtpPass = process.env.SMTP_PASS;
+  const resendKey = process.env.RESEND_API_KEY;
+
+  const mailText = [
+    `Ton code Padely: ${code}`,
+    '',
+    `Ce code expire dans ${EMAIL_CODE_TTL_MIN} minutes.`,
+    `Lien alternatif: ${verificationUrl}`,
+  ].join('\n');
+
+  if (resendKey) {
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${resendKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from,
+        to: [email],
+        subject: 'Padely - code de verification',
+        text: mailText,
+      }),
+    });
+    if (!response.ok) {
+      const details = await response.text();
+      throw new Error(`Resend error: ${details.slice(0, 180)}`);
+    }
+    return {
+      sent: true,
+      provider: 'resend',
+      verificationUrl,
+    };
+  }
 
   if (!smtpHost || !smtpUser || !smtpPass) {
     return {
       sent: false,
+      provider: 'none',
       verificationUrl,
     };
   }
@@ -127,53 +187,77 @@ async function sendEmailVerificationLink({ email, token }) {
   await transporter.sendMail({
     from,
     to: email,
-    subject: 'Padely - verification email',
-    text: `Validez votre email: ${verificationUrl}`,
+    subject: 'Padely - code de verification',
+    text: mailText,
   });
 
   return {
     sent: true,
+    provider: 'smtp',
     verificationUrl,
   };
 }
 
-export async function registerWithEmail({ email, password, displayName }) {
-  if (!email || !password || password.length < 8) {
-    throw new Error('Invalid registration payload');
-  }
-
-  if (await store.getUserByEmail(email)) {
-    throw new Error('Email already exists');
-  }
-
-  const user = await store.createUser({
-    email,
-    passwordHash: hashPassword(password),
-    provider: 'email',
-    displayName: displayName ?? email.split('@')[0],
-    isVerified: false,
-  });
-
+async function issueEmailVerification(user) {
   const verificationToken = newToken();
-  const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24).toISOString();
-  await store.createEmailVerificationToken(user.id, verificationToken, expiresAt);
+  const verificationCode = newEmailCode();
+  const expiresAt = new Date(Date.now() + EMAIL_CODE_TTL_MS).toISOString();
+  await store.deleteEmailVerificationTokensForUser(user.id);
+  await store.createEmailVerificationToken(
+    user.id,
+    verificationToken,
+    verificationCode,
+    expiresAt
+  );
 
-  const mail = await sendEmailVerificationLink({
+  const mail = await sendEmailVerificationCode({
     email: user.email,
+    code: verificationCode,
     token: verificationToken,
   });
 
   return {
+    verificationToken,
+    verificationCode,
+    expiresAt,
+    mail,
+  };
+}
+
+export async function registerWithEmail({ email, password, displayName }) {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail || !password || password.length < 8) {
+    throw new Error('Invalid registration payload');
+  }
+
+  if (await store.getUserByEmail(normalizedEmail)) {
+    throw new Error('Email already exists');
+  }
+
+  const user = await store.createUser({
+    email: normalizedEmail,
+    passwordHash: hashPassword(password),
+    provider: 'email',
+    displayName: displayName ?? normalizedEmail.split('@')[0],
+    isVerified: false,
+  });
+
+  const verification = await issueEmailVerification(user);
+
+  return {
     requiresEmailVerification: true,
-    verificationSent: mail.sent,
-    verificationUrl: process.env.NODE_ENV === 'production' ? undefined : mail.verificationUrl,
-    verificationToken: process.env.NODE_ENV === 'production' ? undefined : verificationToken,
+    verificationSent: verification.mail.sent,
+    verificationProvider: verification.mail.provider,
+    expiresInMinutes: EMAIL_CODE_TTL_MIN,
+    codeLength: EMAIL_CODE_LENGTH,
+    maskedEmail: maskEmail(user.email),
+    devCode: !IS_PROD && EXPOSE_DEV_EMAIL_CODE ? verification.verificationCode : undefined,
     user: sanitizeUser(user),
   };
 }
 
 export async function loginWithEmail({ email, password }) {
-  const user = await store.getUserByEmail(email ?? '');
+  const user = await store.getUserByEmail(normalizeEmail(email));
   if (!user || !user.passwordHash || !verifyPassword(password ?? '', user.passwordHash)) {
     throw new Error('Invalid credentials');
   }
@@ -182,7 +266,7 @@ export async function loginWithEmail({ email, password }) {
   }
 
   const token = newToken();
-  await store.createSession(user.id, token);
+  await store.createSession(user.id, token, SESSION_TTL_MS);
   return { token, user: sanitizeUser(user) };
 }
 
@@ -216,8 +300,89 @@ export async function loginWithProvider({ provider, idToken, email, displayName 
   }
 
   const token = newToken();
-  await store.createSession(user.id, token);
+  await store.createSession(user.id, token, SESSION_TTL_MS);
   return { token, user: sanitizeUser(user) };
+}
+
+export async function resendEmailVerificationCode({ email }) {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) {
+    throw new Error('Email is required');
+  }
+
+  const user = await store.getUserByEmail(normalizedEmail);
+  if (!user) {
+    return {
+      ok: true,
+      requiresEmailVerification: true,
+      verificationSent: false,
+      expiresInMinutes: EMAIL_CODE_TTL_MIN,
+      codeLength: EMAIL_CODE_LENGTH,
+      maskedEmail: maskEmail(normalizedEmail),
+    };
+  }
+
+  if (user.isVerified) {
+    return {
+      ok: true,
+      alreadyVerified: true,
+      maskedEmail: maskEmail(normalizedEmail),
+    };
+  }
+
+  const verification = await issueEmailVerification(user);
+  return {
+    ok: true,
+    requiresEmailVerification: true,
+    verificationSent: verification.mail.sent,
+    verificationProvider: verification.mail.provider,
+    expiresInMinutes: EMAIL_CODE_TTL_MIN,
+    codeLength: EMAIL_CODE_LENGTH,
+    maskedEmail: maskEmail(user.email),
+    devCode: !IS_PROD && EXPOSE_DEV_EMAIL_CODE ? verification.verificationCode : undefined,
+  };
+}
+
+export async function verifyEmailCode({ email, code }) {
+  const normalizedEmail = normalizeEmail(email);
+  const cleanCode = String(code ?? '').trim();
+  if (!normalizedEmail || cleanCode.length !== EMAIL_CODE_LENGTH) {
+    throw new Error('Invalid verification code');
+  }
+
+  const user = await store.getUserByEmail(normalizedEmail);
+  if (!user) {
+    throw new Error('Invalid verification code');
+  }
+  if (user.isVerified) {
+    const sessionToken = newToken();
+    await store.createSession(user.id, sessionToken, SESSION_TTL_MS);
+    return {
+      token: sessionToken,
+      user: sanitizeUser(user),
+      verified: true,
+    };
+  }
+
+  const item = await store.consumeEmailVerificationCode(user.id, cleanCode);
+  if (!item) {
+    throw new Error('Invalid verification code');
+  }
+  if (new Date(item.expiresAt).getTime() < Date.now()) {
+    throw new Error('Verification code expired');
+  }
+
+  const updated = await store.updateUser(user.id, {
+    isVerified: true,
+  });
+  const sessionToken = newToken();
+  await store.createSession(updated.id, sessionToken, SESSION_TTL_MS);
+
+  return {
+    token: sessionToken,
+    user: sanitizeUser(updated),
+    verified: true,
+  };
 }
 
 export async function verifyEmailToken(token) {
@@ -242,7 +407,7 @@ export async function verifyEmailToken(token) {
     isVerified: true,
   });
   const sessionToken = newToken();
-  await store.createSession(updated.id, sessionToken);
+  await store.createSession(updated.id, sessionToken, SESSION_TTL_MS);
 
   return {
     token: sessionToken,

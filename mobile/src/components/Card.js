@@ -1,25 +1,37 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
-import { theme } from '../theme';
+import { useUi } from '../state/ui';
 
 export function Card({ children, style, elevated = false }) {
-  return <View style={[styles.card, elevated && styles.elevated, style]}>{children}</View>;
+  const { palette } = useUi();
+  return (
+    <View
+      style={[
+        styles.card,
+        {
+          backgroundColor: elevated ? palette.cardStrong : palette.card,
+          borderColor: palette.line,
+        },
+        elevated && styles.elevated,
+        style,
+      ]}
+    >
+      {children}
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: theme.colors.card,
-    borderRadius: theme.radius.lg,
-    padding: theme.spacing.md,
+    borderRadius: 22,
+    padding: 16,
     borderWidth: 1,
-    borderColor: theme.colors.line,
   },
   elevated: {
-    backgroundColor: theme.colors.cardStrong,
-    shadowColor: '#000',
-    shadowOpacity: 0.35,
-    shadowRadius: 16,
+    shadowColor: '#000000',
+    shadowOpacity: 0.28,
+    shadowRadius: 18,
     shadowOffset: { width: 0, height: 8 },
-    elevation: 10,
+    elevation: 8,
   },
 });

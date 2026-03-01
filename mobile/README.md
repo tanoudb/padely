@@ -1,29 +1,53 @@
-# Padely Mobile (Expo)
+# Padely Mobile (React Native + Expo)
+
+## Objectif
+
+App mobile padel prete pour build natif iOS/Android (dev client + production), avec GPS actif, branding app (icon/splash), et API backend Padely.
 
 ## Prerequis
 
 - Node.js 20+
 - npm
-- Expo Go (iOS/Android) ou simulateur
+- Compte Expo ([expo.dev](https://expo.dev))
+- Xcode (iOS) / Android Studio (Android)
 
-## Lancer
+## Lancer en developpement (sans Expo Go)
 
 ```bash
 cd /Users/ethan/Desktop/padely/mobile
 npm install
-EXPO_PUBLIC_API_URL=http://127.0.0.1:8787 npm start
+npx expo start --dev-client
 ```
 
-## Onglets
+Puis installer un dev build natif:
 
-- Accueil: score PIR, classement, progression mensuelle
-- Match: tableau de score visuel equipe rouge / equipe bleue avec calcul automatique (points, jeux, sets, tie-break)
-- Partenaires: taux de victoire avec chaque partenaire + distance moyenne + synergie
-- Stats: victoires, defaites, distance totale, distance moyenne, constance, regularite
+```bash
+cd /Users/ethan/Desktop/padely/mobile
+npm run build:ios:dev
+# ou
+npm run build:android:dev
+```
 
-## Notes
+## Build iOS/Android reelle
 
-- Onboarding expert au premier lancement (niveau 1-8 + quiz)
-- Auth email incluse (Google/Apple cote backend en mode MVP)
-- Le mode score est pense pour l usage en paysage
-- La version montre (watchOS / WearOS) est prevue pour reprendre le meme tableau de score
+```bash
+cd /Users/ethan/Desktop/padely/mobile
+npx eas login
+npx eas build:configure
+npm run build:ios:prod
+npm run build:android:prod
+```
+
+## API backend
+
+```bash
+cd /Users/ethan/Desktop/padely/mobile
+EXPO_PUBLIC_API_URL=http://192.168.1.12:8787 npm run dev-client
+```
+
+## Notes importantes
+
+- Permissions GPS configurees via `expo-location` (iOS + Android).
+- App configuree avec `bundleIdentifier` iOS `com.padely.app` et package Android `com.padely.app`.
+- Icône/splash/favicone custom dans `/Users/ethan/Desktop/padely/mobile/assets`.
+- EAS profiles dans `/Users/ethan/Desktop/padely/mobile/eas.json`.

@@ -1,18 +1,34 @@
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://127.0.0.1:8787';
 
 async function request(path, { method = 'GET', body, token } = {}) {
-  const response = await fetch(`${API_URL}${path}`, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  let response;
+  try {
+    response = await fetch(`${API_URL}${path}`, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    throw new Error(`Connexion API impossible (${API_URL}). Lance le backend puis reessaie.`);
+  }
 
-  const payload = await response.json();
+  const raw = await response.text();
+  let payload = {};
+  if (raw) {
+    try {
+      payload = JSON.parse(raw);
+    } catch {
+      payload = {
+        error: raw.slice(0, 180),
+      };
+    }
+  }
+
   if (!response.ok) {
-    throw new Error(payload.error || 'API error');
+    throw new Error(payload.error || `HTTP ${response.status}`);
   }
 
   return payload;
@@ -23,7 +39,8 @@ export const api = {
   login: (body) => request('/api/v1/auth/login', { method: 'POST', body }),
   oauthGoogle: (body) => request('/api/v1/auth/oauth/google', { method: 'POST', body }),
   oauthApple: (body) => request('/api/v1/auth/oauth/apple', { method: 'POST', body }),
-  verifyEmail: (token) => request('/api/v1/auth/verify', { method: 'POST', body: { token } }),
+  verifyEmail: (body) => request('/api/v1/auth/verify', { method: 'POST', body }),
+  resendVerificationCode: (email) => request('/api/v1/auth/verify/resend', { method: 'POST', body: { email } }),
   profile: (token) => request('/api/v1/profile', { token }),
   completeOnboarding: (token, body) => request('/api/v1/profile/onboarding', { method: 'PUT', token, body }),
   updateAthlete: (token, body) => request('/api/v1/profile/athlete', { method: 'PUT', token, body }),
@@ -34,8 +51,14 @@ export const api = {
   createMatchInvite: (token, matchId) => request(`/api/v1/matches/${matchId}/invite`, { method: 'POST', token }),
   listPlayers: (token) => request('/api/v1/community/players?ratingMin=900&ratingMax=2400', { token }),
   leaderboard: (token, city) => request(`/api/v1/community/leaderboard?city=${encodeURIComponent(city)}`, { token }),
+  leaderboardByPeriod: (token, city, period) => request(`/api/v1/community/leaderboard?city=${encodeURIComponent(city)}&period=${encodeURIComponent(period)}`, { token }),
+  leaderboardPeriods: (token, city) => request(`/api/v1/community/leaderboard/periods?city=${encodeURIComponent(city)}`, { token }),
   crew: (token, city) => request(`/api/v1/community/crew${city ? `?city=${encodeURIComponent(city)}` : ''}`, { token }),
   addFriend: (token, friendId) => request('/api/v1/community/friends', { method: 'POST', token, body: { friendId } }),
+  arcadeSearch: (token, tag) => request(`/api/v1/community/arcade/search?tag=${encodeURIComponent(tag)}`, { token }),
+  arcadeConnect: (token, tag) => request('/api/v1/community/arcade/connect', { method: 'POST', token, body: { tag } }),
+  createChannel: (token, name) => request('/api/v1/community/channels', { method: 'POST', token, body: { name } }),
+  joinClubByCode: (token, code) => request('/api/v1/community/clubs/join', { method: 'POST', token, body: { code } }),
   channelMessages: (token, channel) => request(`/api/v1/community/channels/${encodeURIComponent(channel)}/messages`, { token }),
   sendChannelMessage: (token, channel, text) => request(`/api/v1/community/channels/${encodeURIComponent(channel)}/messages`, { method: 'POST', token, body: { text } }),
   privateMessages: (token, friendId) => request(`/api/v1/community/messages/${encodeURIComponent(friendId)}`, { token }),

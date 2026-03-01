@@ -4,6 +4,21 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function withTtl(ttlMs) {
+  const safeTtl = Math.max(60 * 1000, Number(ttlMs) || 72 * 60 * 60 * 1000);
+  return new Date(Date.now() + safeTtl).toISOString();
+}
+
+function makeArcadeTag(displayName, id) {
+  const base = String(displayName ?? 'player')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '')
+    .slice(0, 7)
+    .toUpperCase() || 'PLAYER';
+  const suffix = String(id ?? '').replace(/[^a-zA-Z0-9]/g, '').slice(-4).toUpperCase() || '0000';
+  return `${base}#${suffix}`;
+}
+
 export class FirestoreStore {
   constructor() {
     this.db = null;
@@ -57,7 +72,9 @@ export class FirestoreStore {
       passwordHash,
       provider,
       displayName,
+      arcadeTag: makeArcadeTag(displayName, id),
       avatarUrl: null,
+      isAdmin: false,
       createdAt: nowIso(),
       isVerified: typeof isVerified === 'boolean' ? isVerified : provider !== 'email',
       athlete: {
@@ -82,6 +99,10 @@ export class FirestoreStore {
         publicProfile: true,
         showGuestMatches: false,
         showHealthStats: true,
+      },
+      community: {
+        customChannels: [],
+        joinedClubChannels: [],
       },
       friends: [],
       calibration: {
@@ -113,33 +134,42 @@ export class FirestoreStore {
   }
 
   async updateUser(id, patch) {
-    const current = await this.getUserById(id);
-    if (!current) {
+    await this.ensureReady();
+    const ref = this.users().doc(id);
+    const doc = await ref.get();
+    if (!doc.exists) {
       return null;
     }
-
-    const merged = { ...current, ...patch };
-    await this.users().doc(id).set(merged);
-    return merged;
+    await ref.set(patch, { merge: true });
+    const fresh = await ref.get();
+    return fresh.data();
   }
 
-  async createSession(userId, token) {
+  async createSession(userId, token, ttlMs) {
     await this.ensureReady();
     await this.sessions().doc(token).set({
       token,
       userId,
       createdAt: nowIso(),
+      expiresAt: withTtl(ttlMs),
     });
   }
 
-  async createEmailVerificationToken(userId, token, expiresAt) {
+  async createEmailVerificationToken(userId, token, code, expiresAt) {
     await this.ensureReady();
     await this.emailVerifications().doc(token).set({
       token,
       userId,
+      code: String(code),
       expiresAt,
       createdAt: nowIso(),
     });
+  }
+
+  async deleteEmailVerificationTokensForUser(userId) {
+    await this.ensureReady();
+    const snap = await this.emailVerifications().where('userId', '==', userId).get();
+    await Promise.all(snap.docs.map((doc) => doc.ref.delete()));
   }
 
   async consumeEmailVerificationToken(token) {
@@ -154,10 +184,35 @@ export class FirestoreStore {
     return data;
   }
 
+  async consumeEmailVerificationCode(userId, code) {
+    await this.ensureReady();
+    const snap = await this.emailVerifications()
+      .where('userId', '==', userId)
+      .where('code', '==', String(code).trim())
+      .limit(1)
+      .get();
+    if (snap.empty) {
+      return null;
+    }
+    const doc = snap.docs[0];
+    const data = doc.data();
+    await doc.ref.delete();
+    return data;
+  }
+
   async getSession(token) {
     await this.ensureReady();
-    const doc = await this.sessions().doc(token).get();
-    return doc.exists ? doc.data() : null;
+    const ref = this.sessions().doc(token);
+    const doc = await ref.get();
+    if (!doc.exists) {
+      return null;
+    }
+    const data = doc.data();
+    if (data.expiresAt && new Date(data.expiresAt).getTime() < Date.now()) {
+      await ref.delete();
+      return null;
+    }
+    return data;
   }
 
   async createMatch(match) {
@@ -174,14 +229,15 @@ export class FirestoreStore {
   }
 
   async updateMatch(id, patch) {
-    const current = await this.getMatch(id);
-    if (!current) {
+    await this.ensureReady();
+    const ref = this.matches().doc(id);
+    const doc = await ref.get();
+    if (!doc.exists) {
       return null;
     }
-
-    const merged = { ...current, ...patch };
-    await this.matches().doc(id).set(merged);
-    return merged;
+    await ref.set(patch, { merge: true });
+    const fresh = await ref.get();
+    return fresh.data();
   }
 
   async getMatch(id) {
