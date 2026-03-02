@@ -49,6 +49,7 @@ import {
 } from './services/matchmakingService.js';
 import {
   evaluateBadges,
+  getBadgeGlobalStats,
   runInactivityDecay,
   runSeasonSoftReset,
 } from './services/gamificationService.js';
@@ -71,10 +72,12 @@ import {
 import {
   completeOnboarding,
   getProfile,
+  updatePinnedBadges,
   updatePushToken,
   updateAthleteProfile,
   updateUserSettings,
 } from './services/profileService.js';
+import { getPlayerProfile } from './services/playerProfileService.js';
 import {
   getDashboard,
   getHeadToHead,
@@ -236,6 +239,11 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, await getProfile(me.id));
     }
 
+    if (req.method === 'GET' && url.pathname === '/api/v1/profile/player-profile') {
+      const me = await requireAuth(req);
+      return json(res, 200, await getPlayerProfile(me.id));
+    }
+
     if (req.method === 'PUT' && url.pathname === '/api/v1/profile/onboarding') {
       const me = await requireAuth(req);
       const payload = validateOnboardingPayload(await readJson(req));
@@ -246,6 +254,12 @@ const server = http.createServer(async (req, res) => {
       const me = await requireAuth(req);
       const payload = await readJson(req);
       return json(res, 200, await updateUserSettings(me.id, payload));
+    }
+
+    if (req.method === 'PUT' && url.pathname === '/api/v1/profile/pinned-badges') {
+      const me = await requireAuth(req);
+      const payload = await readJson(req);
+      return json(res, 200, await updatePinnedBadges(me.id, payload));
     }
 
     if (req.method === 'PUT' && url.pathname === '/api/v1/profile/push-token') {
@@ -664,6 +678,11 @@ const server = http.createServer(async (req, res) => {
         const city = url.searchParams.get('city') ?? me.city ?? 'Lyon';
         return json(res, 200, await getSeasonsOverview({ userId: me.id, city }));
       }
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/v1/gamification/badges/stats') {
+      await requireAuth(req);
+      return json(res, 200, await getBadgeGlobalStats());
     }
 
     {

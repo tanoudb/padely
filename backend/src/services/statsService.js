@@ -784,12 +784,43 @@ export async function getDuoStats(userId, options = {}) {
     item.totalDistanceKm += playerWatch(match, userId).distanceKm;
   }
 
-  return [...duoMap.values()].map((item) => ({
+  const rows = [...duoMap.values()].map((item) => ({
     ...item,
     winRate: item.matches ? Number(((item.wins / item.matches) * 100).toFixed(1)) : 0,
     averageDistanceKm: item.matches ? Number((item.totalDistanceKm / item.matches).toFixed(2)) : 0,
     totalDistanceKm: Number(item.totalDistanceKm.toFixed(2)),
   }));
+
+  rows.sort((a, b) => {
+    if (b.winRate !== a.winRate) return b.winRate - a.winRate;
+    return b.matches - a.matches;
+  });
+
+  const bestDuo = rows.find((entry) => entry.matches >= 3) ?? null;
+  if (!bestDuo) {
+    return {
+      rows,
+      bestDuo: null,
+    };
+  }
+
+  const users = await store.listUsers();
+  const names = new Map(users.map((user) => [user.id, user.displayName]));
+  const partnerName = names.get(bestDuo.partnerId) ?? bestDuo.partnerId;
+  const daysSinceLast = bestDuo.lastMatchAt
+    ? Math.floor((Date.now() - new Date(bestDuo.lastMatchAt).getTime()) / DAY_MS)
+    : null;
+
+  return {
+    rows,
+    bestDuo: {
+      ...bestDuo,
+      partnerName,
+      message: `Ton meilleur duo : ${partnerName} (+${Math.round(bestDuo.winRate)}% winrate)`,
+      suggestion: Number.isFinite(daysSinceLast) && daysSinceLast > 14 ? 'Vous devriez rejouer' : null,
+      daysSinceLast,
+    },
+  };
 }
 
 export async function getHeadToHead(userId, opponentId, options = {}) {

@@ -1,5 +1,6 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import { useUi } from '../state/ui';
 import { theme } from '../theme';
 
 const AXES = [
@@ -33,6 +34,8 @@ function edgeStyle(from, to) {
 }
 
 export function RadarDNA({ pillars }) {
+  const { palette } = useUi();
+  const styles = React.useMemo(() => createStyles(palette), [palette]);
   const size = 220;
   const center = size / 2;
   const maxRadius = 76;
@@ -76,66 +79,68 @@ export function RadarDNA({ pillars }) {
   );
 }
 
-const styles = StyleSheet.create({
-  wrapper: {
-    flexDirection: 'row',
-    gap: 10,
-    alignItems: 'center',
-  },
-  chart: {
-    borderRadius: 999,
-    backgroundColor: 'rgba(6, 19, 28, 0.45)',
-    borderWidth: 1,
-    borderColor: theme.colors.line,
-  },
-  ring: {
-    position: 'absolute',
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: 'rgba(157, 185, 203, 0.18)',
-  },
-  axis: {
-    position: 'absolute',
-    height: 1,
-    backgroundColor: 'rgba(157, 185, 203, 0.2)',
-  },
-  edge: {
-    position: 'absolute',
-    height: 2,
-    backgroundColor: theme.colors.accent,
-  },
-  dot: {
-    position: 'absolute',
-    width: 8,
-    height: 8,
-    borderRadius: 99,
-    backgroundColor: theme.colors.accent2,
-  },
-  center: {
-    position: 'absolute',
-    width: 12,
-    height: 12,
-    borderRadius: 99,
-    backgroundColor: theme.colors.warning,
-  },
-  legend: {
-    flex: 1,
-    gap: 4,
-  },
-  legendRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(157, 185, 203, 0.1)',
-    paddingBottom: 4,
-  },
-  legendKey: {
-    color: theme.colors.muted,
-    fontFamily: theme.fonts.body,
-    fontSize: 12,
-  },
-  legendVal: {
-    color: theme.colors.text,
-    fontFamily: theme.fonts.title,
-  },
-});
+function createStyles(palette) {
+  return StyleSheet.create({
+    wrapper: {
+      flexDirection: 'row',
+      gap: 10,
+      alignItems: 'center',
+    },
+    chart: {
+      borderRadius: 999,
+      backgroundColor: 'rgba(6, 19, 28, 0.45)',
+      borderWidth: 1,
+      borderColor: palette.line,
+    },
+    ring: {
+      position: 'absolute',
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: 'rgba(157, 185, 203, 0.18)',
+    },
+    axis: {
+      position: 'absolute',
+      height: 1,
+      backgroundColor: 'rgba(157, 185, 203, 0.2)',
+    },
+    edge: {
+      position: 'absolute',
+      height: 2,
+      backgroundColor: palette.accent,
+    },
+    dot: {
+      position: 'absolute',
+      width: 8,
+      height: 8,
+      borderRadius: 99,
+      backgroundColor: palette.accent2,
+    },
+    center: {
+      position: 'absolute',
+      width: 12,
+      height: 12,
+      borderRadius: 99,
+      backgroundColor: palette.warning,
+    },
+    legend: {
+      flex: 1,
+      gap: 4,
+    },
+    legendRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      borderBottomWidth: 1,
+      borderBottomColor: 'rgba(157, 185, 203, 0.1)',
+      paddingBottom: 4,
+    },
+    legendKey: {
+      color: palette.muted,
+      fontFamily: theme.fonts.body,
+      fontSize: 12,
+    },
+    legendVal: {
+      color: palette.text,
+      fontFamily: theme.fonts.title,
+    },
+  });
+}

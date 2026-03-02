@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { store } from '../store/index.js';
 import { hashPassword, newToken, verifyPassword } from '../utils/security.js';
+import { evaluateAndPersistPlayerProfile } from './playerProfileService.js';
 
 const SESSION_TTL_HOURS = Math.max(1, Number(process.env.SESSION_TTL_HOURS ?? 72));
 const SESSION_TTL_MS = SESSION_TTL_HOURS * 60 * 60 * 1000;
@@ -224,6 +225,14 @@ async function issueEmailVerification(user) {
   };
 }
 
+async function refreshPlayerProfileSafe(userId) {
+  try {
+    await evaluateAndPersistPlayerProfile(userId);
+  } catch {
+    // Profile evaluation must never block auth lifecycle.
+  }
+}
+
 export async function registerWithEmail({ email, password, displayName }) {
   const normalizedEmail = normalizeEmail(email);
   if (!normalizedEmail || !password || password.length < 8) {
@@ -267,6 +276,7 @@ export async function loginWithEmail({ email, password }) {
 
   const token = newToken();
   await store.createSession(user.id, token, SESSION_TTL_MS);
+  await refreshPlayerProfileSafe(user.id);
   return { token, user: sanitizeUser(user) };
 }
 
@@ -301,6 +311,7 @@ export async function loginWithProvider({ provider, idToken, email, displayName 
 
   const token = newToken();
   await store.createSession(user.id, token, SESSION_TTL_MS);
+  await refreshPlayerProfileSafe(user.id);
   return { token, user: sanitizeUser(user) };
 }
 
@@ -357,6 +368,7 @@ export async function verifyEmailCode({ email, code }) {
   if (user.isVerified) {
     const sessionToken = newToken();
     await store.createSession(user.id, sessionToken, SESSION_TTL_MS);
+    await refreshPlayerProfileSafe(user.id);
     return {
       token: sessionToken,
       user: sanitizeUser(user),
@@ -377,6 +389,7 @@ export async function verifyEmailCode({ email, code }) {
   });
   const sessionToken = newToken();
   await store.createSession(updated.id, sessionToken, SESSION_TTL_MS);
+  await refreshPlayerProfileSafe(updated.id);
 
   return {
     token: sessionToken,
@@ -408,6 +421,7 @@ export async function verifyEmailToken(token) {
   });
   const sessionToken = newToken();
   await store.createSession(updated.id, sessionToken, SESSION_TTL_MS);
+  await refreshPlayerProfileSafe(updated.id);
 
   return {
     token: sessionToken,

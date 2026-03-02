@@ -72,9 +72,12 @@ export const api = {
   verifyEmail: (body) => request('/api/v1/auth/verify', { method: 'POST', body }),
   resendVerificationCode: (email) => request('/api/v1/auth/verify/resend', { method: 'POST', body: { email } }),
   profile: (token) => request('/api/v1/profile', { token }),
+  playerProfile: (token) => request('/api/v1/profile/player-profile', { token }),
   completeOnboarding: (token, body) => request('/api/v1/profile/onboarding', { method: 'PUT', token, body }),
   updateAthlete: (token, body) => request('/api/v1/profile/athlete', { method: 'PUT', token, body }),
   updateSettings: (token, body) => request('/api/v1/profile/settings', { method: 'PUT', token, body }),
+  updatePinnedBadges: (token, pinnedBadges) =>
+    request('/api/v1/profile/pinned-badges', { method: 'PUT', token, body: { pinnedBadges } }),
   updatePushToken: (token, body) => request('/api/v1/profile/push-token', { method: 'PUT', token, body }),
   createMatch: (token, body) => request('/api/v1/matches', { method: 'POST', token, body }),
   startLiveMatch: (token, body) => request('/api/v1/matches/live', { method: 'POST', token, body }),
@@ -127,8 +130,16 @@ export const api = {
   sendPrivateMessage: (token, friendId, text) => request(`/api/v1/community/messages/${encodeURIComponent(friendId)}`, { method: 'POST', token, body: { text } }),
   dashboard: (token, userId, period = 'all') =>
     request(`/api/v1/stats/dashboard/${encodeURIComponent(userId)}${toQuery({ period })}`, { token }),
-  duoStats: (token, userId, period = 'all') =>
-    request(`/api/v1/stats/duo/${encodeURIComponent(userId)}${toQuery({ period })}`, { token }),
+  duoStats: async (token, userId, period = 'all') => {
+    const out = await request(`/api/v1/stats/duo/${encodeURIComponent(userId)}${toQuery({ period })}`, { token });
+    if (Array.isArray(out)) {
+      return { rows: out, bestDuo: null };
+    }
+    return {
+      rows: Array.isArray(out?.rows) ? out.rows : [],
+      bestDuo: out?.bestDuo ?? null,
+    };
+  },
   headToHead: (token, userId, opponentId, period = 'all') =>
     request(`/api/v1/stats/head-to-head/${encodeURIComponent(userId)}/${encodeURIComponent(opponentId)}${toQuery({ period })}`, { token }),
   records: (token, userId, period = 'all') =>
@@ -141,6 +152,8 @@ export const api = {
     request(`/api/v1/gamification/seasons${toQuery({ city })}`, { token }),
   badges: (token, userId) =>
     request(`/api/v1/gamification/badges/${encodeURIComponent(userId)}`, { token }),
+  badgeStats: (token) =>
+    request('/api/v1/gamification/badges/stats', { token }),
   listings: (token, city) => request(`/api/v1/marketplace/listings?city=${encodeURIComponent(city)}`, { token }),
   createListing: (token, body) => request('/api/v1/marketplace/listings', { method: 'POST', token, body }),
 };

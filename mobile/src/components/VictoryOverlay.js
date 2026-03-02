@@ -108,8 +108,8 @@ export function VictoryOverlay({
 
   return (
     <Modal visible={visible} transparent animationType="fade">
-      <Animated.View style={[styles.backdrop, { opacity: backdrop }]}>
-        <View style={styles.backdropGlow} />
+      <Animated.View style={[styles.backdrop, { opacity: backdrop, backgroundColor: palette.bg }]}>
+        <View style={[styles.backdropGlow, { backgroundColor: palette.glow }]} />
         <View style={[styles.ambientOrb, styles.ambientOrbLeft, { backgroundColor: palette.accentMuted }]} />
         <View style={[styles.ambientOrb, styles.ambientOrbRight, { backgroundColor: palette.accent2Muted }]} />
 
@@ -200,7 +200,6 @@ export function VictoryOverlay({
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: '#050507',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
@@ -210,7 +209,6 @@ const styles = StyleSheet.create({
     width: 320,
     height: 320,
     borderRadius: 160,
-    backgroundColor: 'rgba(212, 168, 83, 0.08)',
   },
   ambientOrb: {
     position: 'absolute',

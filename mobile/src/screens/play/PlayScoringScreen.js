@@ -39,14 +39,14 @@ function TeamHalf({ title, scorePoint, games, serving, onPress, colors, scaleVal
   return (
     <Pressable onPress={onPress} style={styles.half}>
       <LinearGradient colors={colors} style={StyleSheet.absoluteFill} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} />
-      <Animated.View pointerEvents="none" style={[styles.flash, { backgroundColor: palette.accentMuted }, flashAnimated]} />
+      <Animated.View pointerEvents="none" style={[styles.flash, { backgroundColor: palette.warning }, flashAnimated]} />
       <View style={styles.topRow}>
         <Text style={[styles.teamTitle, { color: palette.text }]} numberOfLines={1}>
           {title}
         </Text>
         {serving ? <ServiceIndicator color={palette.text} accent={palette.accent} surface={palette.bgAlt} /> : null}
       </View>
-      <Animated.Text style={[styles.point, { fontSize: pointSize, color: palette.text }, scoreAnimated]}>
+      <Animated.Text style={[styles.point, { fontSize: pointSize, lineHeight: Math.round(pointSize * 1.02), color: palette.text }, scoreAnimated]}>
         {scorePoint}
       </Animated.Text>
       <View style={styles.halfBottom}>
@@ -89,6 +89,7 @@ export function PlayScoringScreen() {
   const currentServer = getCurrentServer(score);
   const setsLine = score.sets.map((set) => `${set.a}-${set.b}`).join(' · ');
   const oddGamesInSet = (score.currentSet.a + score.currentSet.b) % 2 === 1;
+  const scoreMargin = Math.abs(Number(score.currentSet.a ?? 0) - Number(score.currentSet.b ?? 0));
 
   const teamAName = useMemo(() => {
     const partner = setup?.selectedSlots?.[0];
@@ -101,14 +102,34 @@ export function PlayScoringScreen() {
     return `${slotDisplayName(one, setup?.participants)} + ${slotDisplayName(two, setup?.participants)}`;
   }, [setup]);
 
+  const ratingGap = useMemo(() => {
+    const bySlot = (slot) => {
+      if (slot === setup?.userId) return setup?.participants?.[setup?.userId];
+      if (typeof slot === 'string') return setup?.participants?.[slot];
+      return slot;
+    };
+    const avg = (slots) => {
+      const values = slots
+        .map(bySlot)
+        .map((entry) => Number(entry?.rating ?? entry?.guestRating ?? 1200))
+        .filter((value) => Number.isFinite(value) && value > 0);
+      if (!values.length) return 1200;
+      return values.reduce((sum, value) => sum + value, 0) / values.length;
+    };
+    const teamA = [setup?.userId, setup?.selectedSlots?.[0]];
+    const teamB = [setup?.selectedSlots?.[1], setup?.selectedSlots?.[2]];
+    return Math.abs(avg(teamA) - avg(teamB));
+  }, [setup]);
+  const isKeyMatch = ratingGap < 120 && scoreMargin <= 1 && (score.currentSet.a + score.currentSet.b) >= 6;
+
   const gradients = useMemo(() => ({
     a: [
-      alphaHex(palette.danger, palette.key === 'night' ? 0.46 : 0.2),
-      alphaHex(palette.bgAlt, 0.96),
+      alphaHex(palette.danger, palette.key === 'night' ? 0.72 : 0.56),
+      alphaHex(palette.bgAlt, palette.key === 'night' ? 0.9 : 0.94),
     ],
     b: [
-      alphaHex(palette.info, palette.key === 'night' ? 0.38 : 0.16),
-      alphaHex(palette.bgAlt, 0.96),
+      alphaHex(palette.info, palette.key === 'night' ? 0.68 : 0.52),
+      alphaHex(palette.bgAlt, palette.key === 'night' ? 0.9 : 0.94),
     ],
   }), [palette]);
 
@@ -162,10 +183,17 @@ export function PlayScoringScreen() {
     if (score.winner) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     animatePoint(side);
+    if (side === 'a') {
+      aFlash.value = 0.82;
+      aFlash.value = withTiming(0, { duration: 360 });
+    } else {
+      bFlash.value = 0.82;
+      bFlash.value = withTiming(0, { duration: 360 });
+    }
     setScore((prev) => addPoint(prev, side));
   }
 
-  const pointSize = landscape ? 142 : 126;
+  const pointSize = landscape ? 176 : 148;
 
   return (
     <SafeAreaView style={[styles.root, { backgroundColor: palette.bg }]}>
@@ -181,6 +209,7 @@ export function PlayScoringScreen() {
         <Text style={[styles.headerMeta, { color: palette.textSecondary ?? palette.muted }]}>
           {displayPoints.tieBreak ? t('play.tieBreakOn') : t('play.standardGame')}
         </Text>
+        {isKeyMatch ? <Text style={[styles.keyTag, { color: palette.warning }]}>{t('match.keyMatch')}</Text> : null}
         {!!sideHint ? <Text style={[styles.sideHint, { color: palette.accent }]}>{sideHint}</Text> : null}
       </View>
       <View style={[styles.board, landscape ? styles.boardLandscape : styles.boardPortrait]}>
@@ -259,6 +288,12 @@ const styles = StyleSheet.create({
     fontFamily: theme.fonts.body,
     fontSize: 12,
   },
+  keyTag: {
+    fontFamily: theme.fonts.title,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    fontSize: 11,
+  },
   board: { flex: 1, gap: 10, paddingHorizontal: 10, paddingBottom: 10 },
   boardLandscape: { flexDirection: 'row' },
   boardPortrait: { flexDirection: 'column' },
@@ -296,7 +331,6 @@ const styles = StyleSheet.create({
     fontFamily: theme.fonts.display,
     textAlign: 'center',
     includeFontPadding: false,
-    lineHeight: 132,
   },
   halfBottom: { alignItems: 'center', gap: 4 },
   games: { fontFamily: theme.fonts.title, fontSize: 16, textTransform: 'uppercase', letterSpacing: 0.5 },
@@ -309,7 +343,7 @@ const styles = StyleSheet.create({
   },
   sets: {
     fontFamily: theme.fonts.body,
-    fontSize: 13,
+    fontSize: 14,
     textAlign: 'center',
   },
   sideHint: {

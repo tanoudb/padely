@@ -3,42 +3,157 @@ import assert from 'node:assert/strict';
 import { registerWithEmail } from '../src/services/authService.js';
 import { store } from '../src/store/index.js';
 import { createMatch, validateMatch } from '../src/services/matchService.js';
-import { evaluateBadges } from '../src/services/gamificationService.js';
+import { evaluateBadges, getBadgeGlobalStats } from '../src/services/gamificationService.js';
+import { updatePinnedBadges } from '../src/services/profileService.js';
 import { resetPushServiceForTests, setPushSenderForTests } from '../src/services/pushService.js';
 
-test('badge system unlocks and notifies after validated match', async () => {
-  const p1 = (await registerWithEmail({
-    email: 'badge_p1@padely.app',
-    password: 'strongpass1',
-    displayName: 'Badge P1',
-  })).user;
-  const p2 = (await registerWithEmail({
-    email: 'badge_p2@padely.app',
-    password: 'strongpass2',
-    displayName: 'Badge P2',
-  })).user;
-  const p3 = (await registerWithEmail({
-    email: 'badge_p3@padely.app',
-    password: 'strongpass3',
-    displayName: 'Badge P3',
-  })).user;
-  const p4 = (await registerWithEmail({
-    email: 'badge_p4@padely.app',
-    password: 'strongpass4',
-    displayName: 'Badge P4',
-  })).user;
+async function createValidatedMatch({ teamA, teamB, sets, createdBy, matchFormat = 'standard' }) {
+  const match = await createMatch({
+    teamA,
+    teamB,
+    sets,
+    matchFormat,
+    mode: 'ranked',
+    totalCostEur: 36,
+    clubName: 'Badge Test Club',
+  }, createdBy);
 
-  await store.updateUser(p1.id, {
-    city: 'Paris',
+  const validators = [...teamA, ...teamB].filter((id) => id !== createdBy);
+  for (const userId of validators) {
+    await validateMatch({ matchId: match.id, userId, accepted: true });
+  }
+  return store.getMatch(match.id);
+}
+
+async function createPlayers(prefix, total) {
+  const out = [];
+  for (let index = 0; index < total; index += 1) {
+    const player = (await registerWithEmail({
+      email: `${prefix}_${index}@padely.app`,
+      password: `strongpass_${index}_2026`,
+      displayName: `${prefix} ${index}`,
+    })).user;
+    out.push(player);
+  }
+  return out;
+}
+
+test('badge tier progression upgrades from bronze to silver to gold', async () => {
+  const [main, ...friends] = await createPlayers('badge_tier', 16);
+
+  await store.updateUser(main.id, {
+    friends: friends.slice(0, 4).map((user) => user.id),
+    community: {
+      ...(main.community ?? {}),
+      joinedClubChannels: [],
+    },
+  });
+
+  let evaluation = await evaluateBadges(main.id, { source: 'tier_bronze' });
+  const bronze = evaluation.catalog.find((badge) => badge.key === 'social_butterfly');
+  assert.equal(bronze?.tier, 'bronze');
+
+  await store.updateUser(main.id, {
+    friends: friends.slice(0, 8).map((user) => user.id),
+  });
+
+  for (let i = 0; i < 16; i += 1) {
+    await store.addPrivateMessage({
+      id: `dm_tier_${i}_${main.id}`,
+      fromUserId: i % 2 === 0 ? main.id : friends[0].id,
+      toUserId: i % 2 === 0 ? friends[0].id : main.id,
+      text: `hello_${i}`,
+      createdAt: new Date(Date.now() + i * 1000).toISOString(),
+    });
+  }
+
+  evaluation = await evaluateBadges(main.id, { source: 'tier_silver' });
+  const silver = evaluation.catalog.find((badge) => badge.key === 'social_butterfly');
+  assert.equal(silver?.tier, 'silver');
+  assert.ok(evaluation.tierUpgrades.some((item) => item.badgeKey === 'social_butterfly' && item.newTier === 'silver'));
+
+  await store.updateUser(main.id, {
+    friends: friends.slice(0, 15).map((user) => user.id),
+    community: {
+      ...(main.community ?? {}),
+      joinedClubChannels: ['club:a', 'club:b'],
+    },
+  });
+
+  evaluation = await evaluateBadges(main.id, { source: 'tier_gold' });
+  const gold = evaluation.catalog.find((badge) => badge.key === 'social_butterfly');
+  assert.equal(gold?.tier, 'gold');
+  assert.ok(evaluation.tierUpgrades.some((item) => item.badgeKey === 'social_butterfly' && item.newTier === 'gold'));
+});
+
+test('secret badge remains hidden until unlocked then reveals', async () => {
+  const players = await createPlayers('badge_secret', 4);
+  const [a, b, c, d] = players;
+
+  let evaluation = await evaluateBadges(a.id, { source: 'secret_hidden' });
+  const hiddenBefore = evaluation.catalog.find((badge) => badge.key === 'nail_biter');
+  assert.equal(hiddenBefore?.hiddenLocked, true);
+  assert.equal(hiddenBefore?.title, '???');
+
+  for (let round = 0; round < 3; round += 1) {
+    await createValidatedMatch({
+      teamA: [a.id, b.id],
+      teamB: [c.id, d.id],
+      sets: [
+        { a: 7, b: 6 },
+        { a: 6, b: 7 },
+        { a: 7, b: 6 },
+      ],
+      createdBy: a.id,
+    });
+  }
+
+  evaluation = await evaluateBadges(a.id, { source: 'secret_reveal' });
+  const hiddenAfter = evaluation.catalog.find((badge) => badge.key === 'nail_biter');
+  assert.equal(hiddenAfter?.hiddenLocked, false);
+  assert.equal(hiddenAfter?.tier, 'mythic');
+  assert.equal(hiddenAfter?.title, 'Cardiologue');
+});
+
+test('badge global stats returns percentage by tier', async () => {
+  const [u1, u2, u3, u4] = await createPlayers('badge_stats', 4);
+
+  await store.updateUser(u1.id, {
+    friends: [u2.id, u3.id, u4.id, 'usr_extra_1'],
+  });
+  await evaluateBadges(u1.id, { source: 'stats_bronze' });
+
+  await store.updateUser(u2.id, {
+    friends: [u1.id, u3.id, u4.id, 'usr_extra_2'],
+  });
+  await evaluateBadges(u2.id, { source: 'stats_bronze_2' });
+
+  const stats = await getBadgeGlobalStats();
+  assert.ok(typeof stats.totalUsers === 'number' && stats.totalUsers >= 4);
+  const social = stats.badges.find((badge) => badge.key === 'social_butterfly');
+  assert.ok(social);
+  assert.ok(social.tiers.some((tier) => tier.tier === 'bronze'));
+  assert.ok(social.tiers.every((tier) => typeof tier.percent === 'number'));
+});
+
+test('pinned badges endpoint stores at most 3 distinct badges', async () => {
+  const [user] = await createPlayers('badge_pin', 1);
+  const updated = await updatePinnedBadges(user.id, {
+    pinnedBadges: ['warrior', 'sniper', 'warrior', 'ironman', 'metronome'],
+  });
+  assert.deepEqual(updated.settings.pinnedBadges, ['warrior', 'sniper', 'ironman']);
+});
+
+test('badge pushes include unlock and tier-up payloads', async () => {
+  const [main, ...friends] = await createPlayers('badge_push', 9);
+  await store.updateUser(main.id, {
     pushTokens: [{
-      token: 'ExponentPushToken[badge-p1]',
+      token: `ExponentPushToken[${main.id}]`,
       platform: 'ios',
       updatedAt: new Date().toISOString(),
     }],
+    friends: friends.slice(0, 4).map((user) => user.id),
   });
-  await store.updateUser(p2.id, { city: 'Paris' });
-  await store.updateUser(p3.id, { city: 'Paris' });
-  await store.updateUser(p4.id, { city: 'Paris' });
 
   const sent = [];
   setPushSenderForTests(async (messages) => {
@@ -46,84 +161,37 @@ test('badge system unlocks and notifies after validated match', async () => {
     return { receipts: messages.length };
   });
 
-  const match = await createMatch({
-    teamA: [p1.id, p2.id],
-    teamB: [p3.id, p4.id],
-    sets: [
-      { a: 6, b: 0 },
-      { a: 6, b: 1 },
-    ],
-    goldenPoints: { teamA: 16, teamB: 0 },
-    totalCostEur: 48,
-    clubName: 'Padely Club Paris',
-    matchFormat: 'standard',
-  }, p1.id);
-
-  await validateMatch({ matchId: match.id, userId: p2.id, accepted: true });
-  await validateMatch({ matchId: match.id, userId: p3.id, accepted: true });
-  const validated = await validateMatch({ matchId: match.id, userId: p4.id, accepted: true });
-  assert.equal(validated.status, 'validated');
-
-  const badges = await evaluateBadges(p1.id, { source: 'test_check' });
-  const firstBlood = badges.catalog.find((badge) => badge.key === 'first_blood');
-  const goldenTouch = badges.catalog.find((badge) => badge.key === 'golden_touch');
-  assert.equal(firstBlood?.unlocked, true);
-  assert.equal(goldenTouch?.unlocked, true);
-  assert.equal(badges.catalog.length, 8);
-
-  const badgePush = sent.find((message) => message?.data?.type === 'badge_unlocked');
-  assert.ok(badgePush, 'expected at least one badge_unlocked push payload');
-
-  resetPushServiceForTests();
-});
-
-test('social butterfly badge unlocks from friends, clubs and DM activity', async () => {
-  const main = (await registerWithEmail({
-    email: 'badge_social_main@padely.app',
-    password: 'strongpass1',
-    displayName: 'Badge Social Main',
-  })).user;
-  const f1 = (await registerWithEmail({
-    email: 'badge_social_f1@padely.app',
-    password: 'strongpass2',
-    displayName: 'Badge Social F1',
-  })).user;
-  const f2 = (await registerWithEmail({
-    email: 'badge_social_f2@padely.app',
-    password: 'strongpass3',
-    displayName: 'Badge Social F2',
-  })).user;
-  const f3 = (await registerWithEmail({
-    email: 'badge_social_f3@padely.app',
-    password: 'strongpass4',
-    displayName: 'Badge Social F3',
-  })).user;
-  const f4 = (await registerWithEmail({
-    email: 'badge_social_f4@padely.app',
-    password: 'strongpass5',
-    displayName: 'Badge Social F4',
-  })).user;
-
-  await store.updateUser(main.id, {
-    friends: [f1.id, f2.id, f3.id, f4.id],
-    community: {
-      ...(main.community ?? {}),
-      joinedClubChannels: ['club:alpha'],
-    },
+  await createValidatedMatch({
+    teamA: [main.id, friends[0].id],
+    teamB: [friends[1].id, friends[2].id],
+    sets: [{ a: 6, b: 2 }, { a: 6, b: 4 }],
+    createdBy: main.id,
   });
 
-  if (typeof store.addPrivateMessage === 'function') {
-    for (let i = 0; i < 22; i += 1) {
-      await store.addPrivateMessage({
-        id: `msg_social_${i}`,
-        fromUserId: i % 2 === 0 ? main.id : f1.id,
-        toUserId: i % 2 === 0 ? f1.id : main.id,
-        text: `hello ${i}`,
-        createdAt: new Date(Date.now() + i * 1000).toISOString(),
-      });
-    }
+  await store.updateUser(main.id, {
+    friends: friends.map((user) => user.id),
+  });
+  for (let i = 0; i < 14; i += 1) {
+    await store.addPrivateMessage({
+      id: `dm_push_${i}_${main.id}`,
+      fromUserId: i % 2 === 0 ? main.id : friends[0].id,
+      toUserId: i % 2 === 0 ? friends[0].id : main.id,
+      text: `dm_${i}`,
+      createdAt: new Date(Date.now() + i * 1000).toISOString(),
+    });
   }
 
-  const badges = await evaluateBadges(main.id, { source: 'social_test' });
-  assert.ok(badges.badges.includes('social_butterfly'));
+  await createValidatedMatch({
+    teamA: [main.id, friends[0].id],
+    teamB: [friends[1].id, friends[3].id],
+    sets: [{ a: 7, b: 6 }, { a: 6, b: 4 }],
+    createdBy: main.id,
+  });
+
+  const unlockPush = sent.find((message) => message?.data?.type === 'badge_unlocked');
+  const tierUpPush = sent.find((message) => message?.data?.type === 'badge_tier_up');
+  assert.ok(unlockPush, 'expected badge_unlocked push payload');
+  assert.ok(tierUpPush, 'expected badge_tier_up push payload');
+
+  resetPushServiceForTests();
 });

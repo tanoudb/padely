@@ -20,6 +20,12 @@ import { useUi } from '../state/ui';
 import { theme } from '../theme';
 
 const PERIODS = ['week', 'month', 'season', 'all'];
+const TIER_COLORS = {
+  bronze: '#CD7F32',
+  silver: '#C0C0C0',
+  gold: '#FFD700',
+  mythic: '#9B59B6',
+};
 const BADGE_FALLBACK = [
   { key: 'first_blood', title: 'First Blood', description: 'Valider ton premier match.' },
   { key: 'serial_winner', title: 'Serial Winner', description: '6 victoires consecutives.' },
@@ -158,12 +164,17 @@ function BadgeUnlockOverlay({ badge, palette }) {
   );
 }
 
-function BadgeGrid({ catalog, palette }) {
+function BadgeGrid({ catalog, palette, t, statsByKey, pinnedBadges, onTogglePin }) {
   const rows = Array.isArray(catalog) && catalog.length ? catalog : BADGE_FALLBACK;
   return (
     <View style={styles.badgeGrid}>
       {rows.map((badge) => {
         const unlocked = Boolean(badge.unlocked);
+        const tier = String(badge.tier ?? '').toLowerCase();
+        const tierColor = TIER_COLORS[tier] ?? palette.muted;
+        const hiddenLocked = Boolean(badge.hiddenLocked);
+        const percentByTier = Number(statsByKey?.[badge.key]?.[tier] ?? 0);
+        const isPinned = pinnedBadges.includes(badge.key);
         return (
           <View
             key={badge.key}
@@ -177,9 +188,30 @@ function BadgeGrid({ catalog, palette }) {
               },
             ]}
           >
-            <Text style={[styles.badgeCellTitle, { color: unlocked ? palette.accent : palette.textSecondary }]} numberOfLines={2}>{badge.title}</Text>
-            <Text style={[styles.badgeCellDesc, { color: palette.textSecondary }]} numberOfLines={3}>{badge.description}</Text>
-            <Text style={[styles.badgeCellState, { color: unlocked ? palette.accent2 : palette.muted }]}>{unlocked ? 'UNLOCKED' : 'LOCKED'}</Text>
+            <Text style={[styles.badgeCellTitle, { color: unlocked ? (hiddenLocked ? palette.textSecondary : palette.accent) : palette.textSecondary }]} numberOfLines={2}>
+              {hiddenLocked ? '???' : badge.title}
+            </Text>
+            <Text style={[styles.badgeCellDesc, { color: palette.textSecondary }]} numberOfLines={3}>
+              {hiddenLocked ? t('badge.secretLocked') : (badge.description ?? '')}
+            </Text>
+            <Text style={[styles.badgeCellState, { color: unlocked ? tierColor : palette.muted }]}>
+              {unlocked ? t(`badge.tier.${tier}`) : t('badge.locked')}
+            </Text>
+            {unlocked ? (
+              <Text style={[styles.badgePercent, { color: palette.textSecondary }]}>
+                {t('badge.percentGlobal', { percent: percentByTier.toFixed(1) })}
+              </Text>
+            ) : null}
+            {badge?.nextTier?.progressPercent !== undefined && unlocked ? (
+              <View style={[styles.progressTrack, { backgroundColor: palette.bgAlt, borderColor: palette.line }]}>
+                <View style={[styles.progressFill, { width: `${Math.max(4, Math.min(100, badge.nextTier.progressPercent))}%`, backgroundColor: palette.accent }]} />
+              </View>
+            ) : null}
+            <Pressable style={[styles.pinBtn, { borderColor: palette.line }]} onPress={() => onTogglePin(badge.key)}>
+              <Text style={[styles.pinBtnText, { color: isPinned ? palette.accent : palette.textSecondary }]}>
+                {isPinned ? t('badge.pinnedShort') : t('badge.pinShort')}
+              </Text>
+            </Pressable>
           </View>
         );
       })}
@@ -194,12 +226,16 @@ export function ProfileScreen() {
   const { palette } = useUi();
 
   const [dashboard, setDashboard] = useState(null);
+  const [playerProfilePack, setPlayerProfilePack] = useState(null);
+  const [badgeStats, setBadgeStats] = useState(null);
   const [duos, setDuos] = useState([]);
+  const [duoSummary, setDuoSummary] = useState(null);
   const [players, setPlayers] = useState([]);
   const [records, setRecords] = useState(null);
   const [period, setPeriod] = useState('season');
   const [loadError, setLoadError] = useState('');
   const [badges, setBadges] = useState(BADGE_FALLBACK);
+  const [pinnedBadges, setPinnedBadges] = useState(Array.isArray(user?.settings?.pinnedBadges) ? user.settings.pinnedBadges : []);
   const [unlockQueue, setUnlockQueue] = useState([]);
   const [activeUnlock, setActiveUnlock] = useState(null);
 
@@ -209,18 +245,23 @@ export function ProfileScreen() {
   async function loadProfileData() {
     setLoadError('');
     try {
-      const [db, duoStats, playerList, recordsOut] = await Promise.all([
+      const [db, profilePack, duoStats, playerList, recordsOut, badgeOut, badgeStatsOut] = await Promise.all([
         api.dashboard(token, user.id, period),
+        api.playerProfile(token),
         api.duoStats(token, user.id, period),
         api.listPlayers(token),
         api.records(token, user.id, period),
+        api.badges(token, user.id),
+        api.badgeStats(token),
       ]);
-      const badgeOut = await api.badges(token, user.id);
       setDashboard(db);
-      setDuos(duoStats);
+      setPlayerProfilePack(profilePack);
+      setDuos(Array.isArray(duoStats?.rows) ? duoStats.rows : []);
+      setDuoSummary(duoStats?.bestDuo ?? null);
       setPlayers(playerList);
       setRecords(recordsOut);
       setBadges(Array.isArray(badgeOut?.catalog) && badgeOut.catalog.length ? badgeOut.catalog : BADGE_FALLBACK);
+      setBadgeStats(badgeStatsOut);
       if (Array.isArray(badgeOut?.newlyUnlocked) && badgeOut.newlyUnlocked.length) {
         setUnlockQueue((current) => {
           const seen = new Set(current.map((entry) => `${entry.badgeKey}:${entry.unlockedAt}`));
@@ -240,6 +281,23 @@ export function ProfileScreen() {
         return;
       }
       setLoadError(message);
+    }
+  }
+
+  async function togglePinnedBadge(badgeKey) {
+    let next = [];
+    setPinnedBadges((current) => {
+      if (current.includes(badgeKey)) {
+        next = current.filter((key) => key !== badgeKey);
+      } else {
+        next = [...current, badgeKey].slice(-3);
+      }
+      return next;
+    });
+    try {
+      await api.updatePinnedBadges(token, next);
+    } catch {
+      await loadProfileData();
     }
   }
 
@@ -273,19 +331,21 @@ export function ProfileScreen() {
     return b.matches - a.matches;
   });
 
-  const bestDuo = sortedDuos[0] ?? null;
+  const bestDuo = duoSummary ?? sortedDuos[0] ?? null;
   const rating = dashboard?.rating ?? user.rating ?? 1200;
   const pir = dashboard?.pir ?? user.pir ?? 50;
-  const formScore = Number(dashboard?.form?.score ?? 0);
-  const playerProfileType = dashboard?.playerProfileType ?? 'regular';
+  const formScore = Number(playerProfilePack?.playerProfile?.formScore ?? dashboard?.form?.score ?? 0);
+  const playerProfileType = playerProfilePack?.playerProfile?.type ?? dashboard?.playerProfileType ?? 'regular';
+  const personality = playerProfilePack?.playerProfile?.personality ?? null;
   const playerRhythm = dashboard?.playerRhythm ?? user.settings?.playerRhythm ?? 'regular';
-  const smartStreak = dashboard?.smartStreak ?? null;
+  const smartStreak = playerProfilePack?.playerProfile?.activityStreak ?? dashboard?.smartStreak ?? null;
   const streakUnit = smartStreak?.unit ?? 'day';
   const streakCount = Number(smartStreak?.count ?? 0);
-  const adaptiveObjective = dashboard?.adaptiveObjective ?? null;
-  const returnMode = dashboard?.returnMode ?? null;
+  const adaptiveObjective = playerProfilePack?.playerProfile?.objective ?? dashboard?.adaptiveObjective ?? null;
+  const returnMode = playerProfilePack?.playerProfile?.comebackMode ?? dashboard?.returnMode ?? null;
   const latestMatchInsight = dashboard?.latestMatchInsight ?? null;
   const narrativePhase = dashboard?.narrativePhase ?? 'nouveau_cap';
+  const rivalries = Array.isArray(playerProfilePack?.playerProfile?.rivalries) ? playerProfilePack.playerProfile.rivalries : [];
   const progressionTimeline = (dashboard?.progression ?? [])
     .slice(-4)
     .reverse()
@@ -301,19 +361,34 @@ export function ProfileScreen() {
       : streakUnit === 'window'
         ? t('profile.streakWindows')
         : t('profile.streakDays');
-  const objectiveLine = adaptiveObjective?.mode === 'return'
-    ? t('profile.objectiveReturn', { count: adaptiveObjective.targetActivities, days: adaptiveObjective.windowDays })
-    : adaptiveObjective?.mode === 'chase'
-      ? t('profile.objectiveChase', { count: adaptiveObjective.remainingActivities, days: adaptiveObjective.windowDays })
-      : adaptiveObjective
-        ? t('profile.objectiveMaintain', { count: adaptiveObjective.targetActivities, days: adaptiveObjective.windowDays })
-        : t('profile.objectiveFallback');
+  const objectiveLine = adaptiveObjective?.type
+    ? t('profile.objectiveProgressSimple', {
+      current: adaptiveObjective.current ?? 0,
+      target: adaptiveObjective.target ?? 0,
+    })
+    : adaptiveObjective?.mode === 'return'
+      ? t('profile.objectiveReturn', { count: adaptiveObjective.targetActivities, days: adaptiveObjective.windowDays })
+      : adaptiveObjective?.mode === 'chase'
+        ? t('profile.objectiveChase', { count: adaptiveObjective.remainingActivities, days: adaptiveObjective.windowDays })
+        : adaptiveObjective
+          ? t('profile.objectiveMaintain', { count: adaptiveObjective.targetActivities, days: adaptiveObjective.windowDays })
+          : t('profile.objectiveFallback');
   const momentLine = (latestMatchInsight?.momentTags ?? [])
     .map((tag) => t(`profile.moment_${tag}`))
     .filter(Boolean)
     .slice(0, 3)
     .join(' · ');
   const isLoading = !dashboard && !records;
+  const badgeStatsByKey = useMemo(() => {
+    const map = {};
+    for (const row of badgeStats?.badges ?? []) {
+      map[row.key] = {};
+      for (const tierRow of row.tiers ?? []) {
+        map[row.key][tierRow.tier] = Number(tierRow.percent ?? 0);
+      }
+    }
+    return map;
+  }, [badgeStats]);
   const pirLive = useCountUp(pir);
   const ratingLive = useCountUp(rating);
   const identityEntry = useStaggeredEntry(0, !isLoading);
@@ -365,6 +440,8 @@ export function ProfileScreen() {
               <Text style={[styles.meta, { color: palette.textSecondary }]}>{t('profile.winRate', { rate: bestDuo.winRate })}</Text>
               <Text style={[styles.meta, { color: palette.textSecondary }]}>{t('profile.avgDistance', { distance: bestDuo.averageDistanceKm })}</Text>
               <Text style={[styles.meta, { color: palette.textSecondary }]}>{t('profile.matchesTogether', { matches: bestDuo.matches })}</Text>
+              {!!bestDuo.message ? <Text style={[styles.meta, { color: palette.accent }]}>{bestDuo.message}</Text> : null}
+              {!!bestDuo.suggestion ? <Text style={[styles.meta, { color: palette.accent2 }]}>{bestDuo.suggestion}</Text> : null}
             </>
           ) : (
             <EmptyState title={t('profile.emptyPartnersTitle')} body={t('profile.emptyPartnersBody')} variant="profile" compact />
@@ -464,6 +541,11 @@ export function ProfileScreen() {
                 <Text style={[styles.rankText, { color: palette.accent }]}>{rankFromRating(rating)}</Text>
                 <Text style={[styles.meta, { color: palette.textSecondary }]}>{t('profile.rankLine', { pir: pirLive, rating: ratingLive })}</Text>
                 <Text style={[styles.meta, { color: palette.textSecondary }]}>{t('profile.arcadeTag', { tag: arcadeTag })}</Text>
+                {!!pinnedBadges.length ? (
+                  <Text style={[styles.meta, { color: palette.accent }]}>
+                    {t('badge.pinned')}: {pinnedBadges.join(' · ')}
+                  </Text>
+                ) : null}
                 <Pressable style={[styles.shareTagBtn, { borderColor: palette.line, backgroundColor: palette.cardStrong }]} onPress={shareArcadeTag}>
                   <Text style={[styles.shareTagText, { color: palette.text }]}>{t('profile.shareQr')}</Text>
                 </Pressable>
@@ -477,9 +559,14 @@ export function ProfileScreen() {
               <Text style={[styles.meta, { color: palette.textSecondary }]}>
                 {t('profile.formLine', {
                   form: formScore,
-                  profile: t(`profile.profileType_${playerProfileType}`),
+                  profile: t(`profile.type.${playerProfileType}`),
                 })}
               </Text>
+              {personality ? (
+                <Text style={[styles.meta, { color: palette.accent }]}>
+                  {t('profile.personalityTitle')}: {t(`profile.personality.${personality}`)}
+                </Text>
+              ) : null}
               <Text style={[styles.meta, { color: palette.textSecondary }]}>
                 {t('profile.rhythmLine', {
                   rhythm: t(`profile.rhythm_${playerRhythm}`),
@@ -490,7 +577,10 @@ export function ProfileScreen() {
               <Text style={[styles.meta, { color: palette.accent }]}>{objectiveLine}</Text>
               {returnMode?.active ? (
                 <Text style={[styles.meta, { color: palette.accent2 }]}>
-                  {t('profile.returnModeLine', { days: returnMode.pauseDays, bonus: returnMode.bonusForm })}
+                  {t('profile.returnModeLine', {
+                    days: returnMode.pauseDays ?? returnMode.daysSinceLastMatch ?? 0,
+                    bonus: returnMode.bonusForm ?? (returnMode.bonusApplied ? 1 : 0),
+                  })}
                 </Text>
               ) : null}
               {latestMatchInsight ? (
@@ -546,11 +636,32 @@ export function ProfileScreen() {
             </Card>
           </AnimatedView>
 
+          <AnimatedView style={recordsEntry}>
+            <Card>
+              <Text style={[styles.cardTitle, { color: palette.text }]}>{t('profile.rivalriesTitle')}</Text>
+              {rivalries.length ? rivalries.slice(0, 3).map((row) => (
+                <StatLine
+                  key={row.opponentId}
+                  label={t('profile.vsLabel', { name: playersById.get(row.opponentId)?.displayName ?? row.opponentId })}
+                  value={`${row.wins}-${row.losses}`}
+                  palette={palette}
+                />
+              )) : <Text style={[styles.meta, { color: palette.textSecondary }]}>{t('profile.rivalriesEmpty')}</Text>}
+            </Card>
+          </AnimatedView>
+
           <AnimatedView style={badgesEntry}>
             <Card>
-              <Text style={[styles.cardTitle, { color: palette.text }]}>Badges</Text>
+              <Text style={[styles.cardTitle, { color: palette.text }]}>{t('profile.badgesTitle')}</Text>
               {badges.length ? (
-                <BadgeGrid catalog={badges} palette={palette} />
+                <BadgeGrid
+                  catalog={badges}
+                  palette={palette}
+                  t={t}
+                  statsByKey={badgeStatsByKey}
+                  pinnedBadges={pinnedBadges}
+                  onTogglePin={togglePinnedBadge}
+                />
               ) : (
                 <EmptyState title={t('profile.emptyBadgeTitle')} body={t('profile.emptyBadgeBody')} variant="profile" compact />
               )}
@@ -739,6 +850,36 @@ const styles = StyleSheet.create({
     fontFamily: theme.fonts.title,
     fontSize: 9,
     letterSpacing: 0.5,
+  },
+  badgePercent: {
+    marginTop: 2,
+    fontFamily: theme.fonts.body,
+    fontSize: 9,
+    lineHeight: 11,
+  },
+  progressTrack: {
+    marginTop: 4,
+    height: 5,
+    borderRadius: 999,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 999,
+  },
+  pinBtn: {
+    marginTop: 4,
+    minHeight: 20,
+    borderRadius: 999,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pinBtnText: {
+    fontFamily: theme.fonts.title,
+    fontSize: 11,
+    lineHeight: 13,
   },
   unlockOverlay: {
     position: 'absolute',

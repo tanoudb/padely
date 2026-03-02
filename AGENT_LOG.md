@@ -297,3 +297,21 @@ Validation: backend tests OK `36/36` (`npm test`), exports Expo iOS et Android r
 ✅
 ### Prochaine mission recommandée
 REFONTE PROFIL (avatar/radar PIR DNA/stats compactes) pour aligner le dernier grand écran premium
+
+## [2026-03-02] — Run #19
+### Mission
+PADELY V2 — REFONTE DESIGN + FEATURES ENGAGEMENT
+### Résultat
+Padely passe sur une direction visuelle sport (jour/nuit) plus énergique et une expérience contextuelle orientée engagement: Home affiche désormais le Score Forme + “Ton moment”, le résultat de match embarque stress tag/key match + carte souvenir partageable, et le profil expose personnalité, rivalités, badges tiers et badges épinglés.
+Le backend adapte maintenant automatiquement l’app au type joueur (`chill|regular|competitor`) avec calcul de personnalité/streak/comeback/objectif/rivalités, enrichit la narration match (`stressTag`, `isKeyMatch`) et fait évoluer les badges en tiers (bronze/silver/gold/mythic) avec stats globales.
+### Technique
+Backend: nouveau service `backend/src/services/playerProfileService.js`, routes `GET /api/v1/profile/player-profile`, `PUT /api/v1/profile/pinned-badges`, `GET /api/v1/gamification/badges/stats` dans `backend/src/server.js`, store users enrichi (`playerProfile`, `settings.pinnedBadges`) + API store `updatePlayerProfile` et tiers badges (`unlockBadge`/`updateBadgeTier`/`listBadgesForUser`) dans `sqlite|memory|firestore`. Refonte `backend/src/services/gamificationService.js` (catalogue badges V2, tier upgrades, hidden secrets, stats globales). `backend/src/services/matchService.js` enrichi (`computeStressTag`, key match, push `badge_tier_up`/`key_match`/`rivalry_alert`, recalcul player profile).
+Mobile: palette sport mise à jour dans `mobile/src/state/ui.js` + `mobile/src/theme.js`; nouveaux endpoints client (`playerProfile`, `badgeStats`, `updatePinnedBadges`) dans `mobile/src/api/client.js`; nouveau helper `mobile/src/utils/playerContext.js`; refontes `mobile/src/screens/HomeScreen.js`, `mobile/src/screens/ProfileScreen.js`, `mobile/src/screens/play/PlayScoringScreen.js`, `mobile/src/screens/play/PlayResultScreen.js`, ajustements `mobile/src/screens/OnboardingScreen.js`, `mobile/src/components/VictoryOverlay.js`, `mobile/src/utils/notifications.js`, i18n FR/EN étendu dans `mobile/src/i18n/dictionaries.js`.
+Tests: nouveaux `backend/test/playerProfile.test.js` et `backend/test/matchNarrative.test.js`; refonte `backend/test/badgeSystem.test.js` pour tiers/secrets/stats/pins/tier-up push.
+### Validation
+Backend tests verts: `44/44` via `npm test`.
+Exports mobile validés: `npx expo export --platform ios` et `npx expo export --platform android` OK.
+### Statut
+✅
+### Prochaine mission recommandée
+Nettoyage des écrans legacy non routés (`PlayScreen`, `StatsScreen`, `PartnersScreen`) pour réduire la dette UI et centraliser définitivement les parcours sur les écrans `mobile/src/screens/play/*`.

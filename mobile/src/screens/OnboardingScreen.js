@@ -88,6 +88,9 @@ export function OnboardingScreen() {
     const normalized = Math.round((score / (QUESTIONS.length * 3)) * 7) + 1;
     return Math.min(8, Math.max(1, normalized));
   }, [allAnswered, answers, level]);
+  const welcomeLine = playerRhythm === 'light'
+    ? t('onboarding.welcomeLight')
+    : t('onboarding.welcomeAdaptive');
 
   useEffect(() => {
     sliderStep.value = withSpring(step, SPRING);
@@ -146,6 +149,7 @@ export function OnboardingScreen() {
         <Text style={[styles.eyebrow, { color: palette.accent }]}>{t('onboarding.kicker')}</Text>
         <Text style={[styles.title, { color: palette.text }]}>{t('onboarding.title', { name: user?.displayName ?? 'Player' })}</Text>
         <Text style={[styles.subtitle, { color: palette.textSecondary }]}>{t('onboarding.subtitle')}</Text>
+        <Text style={[styles.welcomeLine, { color: palette.accent2 }]}>{welcomeLine}</Text>
 
         <View style={styles.dotsRow}>
           {[0, 1, 2].map((index) => {
@@ -447,6 +451,7 @@ const styles = StyleSheet.create({
   },
   title: { marginTop: 8, fontFamily: theme.fonts.display, fontSize: 39, lineHeight: 41 },
   subtitle: { marginTop: 6, fontFamily: theme.fonts.body, fontSize: 13, lineHeight: 18 },
+  welcomeLine: { marginTop: 4, fontFamily: theme.fonts.title, fontSize: 12, letterSpacing: 0.4 },
   dotsRow: { marginTop: 16, marginBottom: 14, flexDirection: 'row', alignItems: 'center', gap: 8 },
   dot: { height: 10, borderRadius: 9 },
   sliderWrap: {

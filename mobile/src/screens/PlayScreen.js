@@ -26,6 +26,7 @@ import { QrScannerModal } from '../components/QrScannerModal';
 import { VictoryOverlay } from '../components/VictoryOverlay';
 import { useI18n } from '../state/i18n';
 import { useSession } from '../state/session';
+import { PALETTES } from '../state/ui';
 import { theme } from '../theme';
 import { createLiveScoreSubscription } from '../utils/liveScoreStream';
 import {
@@ -39,6 +40,8 @@ import {
   setPuntoDeOro,
   undoPoint,
 } from '../utils/scoring';
+
+const palette = PALETTES.day;
 
 function scoreConfigFromPreferences(settings = {}) {
   const pointRule = settings.pointRule ?? 'punto_de_oro';
@@ -982,7 +985,7 @@ export function PlayScreen() {
             <TextInput
               style={[styles.input, styles.rowTagInput]}
               placeholder={t('play.arcadePlaceholder')}
-              placeholderTextColor={theme.colors.muted}
+              placeholderTextColor={palette.muted}
               autoCapitalize="characters"
               value={arcadeTagInput}
               onChangeText={setArcadeTagInput}
@@ -1014,7 +1017,7 @@ export function PlayScreen() {
               <TextInput
                 style={[styles.input, styles.guestInput]}
                 placeholder={t('play.guestName')}
-                placeholderTextColor={theme.colors.muted}
+                placeholderTextColor={palette.muted}
                 value={guestName}
                 onChangeText={setGuestName}
               />
@@ -1125,7 +1128,7 @@ export function PlayScreen() {
             <TextInput
               style={[styles.input, styles.rowTagInput]}
               placeholder="Code live (ex: live_ABC123)"
-              placeholderTextColor={theme.colors.muted}
+              placeholderTextColor={palette.muted}
               autoCapitalize="none"
               value={joinLiveInput}
               onChangeText={setJoinLiveInput}
@@ -1348,12 +1351,12 @@ const styles = StyleSheet.create({
     height: 1350,
   },
   header: { marginBottom: 4 },
-  eyebrow: { color: theme.colors.accent2, fontFamily: theme.fonts.mono, letterSpacing: 1, fontSize: 11 },
-  h1: { color: theme.colors.text, fontSize: 40, lineHeight: 42, fontFamily: theme.fonts.display },
+  eyebrow: { color: palette.accent2, fontFamily: theme.fonts.mono, letterSpacing: 1, fontSize: 11 },
+  h1: { color: palette.text, fontSize: 40, lineHeight: 42, fontFamily: theme.fonts.display },
   headerSub: { color: '#BED3E1', fontFamily: theme.fonts.body, fontSize: 13, marginTop: 4, maxWidth: 320 },
-  sectionTitle: { color: theme.colors.text, fontFamily: theme.fonts.title, marginBottom: 8, fontSize: 16 },
-  label: { color: theme.colors.muted, marginBottom: 4, marginTop: 4, fontFamily: theme.fonts.body },
-  meta: { color: theme.colors.muted, marginBottom: 6, fontFamily: theme.fonts.body },
+  sectionTitle: { color: palette.text, fontFamily: theme.fonts.title, marginBottom: 8, fontSize: 16 },
+  label: { color: palette.muted, marginBottom: 4, marginTop: 4, fontFamily: theme.fonts.body },
+  meta: { color: palette.muted, marginBottom: 6, fontFamily: theme.fonts.body },
   wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
   rowWrap: { gap: 8, marginBottom: 8 },
   modeBtn: {
@@ -1361,8 +1364,8 @@ const styles = StyleSheet.create({
     minHeight: 72,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: theme.colors.line,
-    backgroundColor: theme.colors.bgAlt,
+    borderColor: palette.line,
+    backgroundColor: palette.bgAlt,
     padding: 10,
     gap: 4,
   },
@@ -1371,23 +1374,23 @@ const styles = StyleSheet.create({
     backgroundColor: '#1E5A4D',
   },
   modeBtnActiveRanked: {
-    borderColor: theme.colors.accent,
+    borderColor: palette.accent,
     backgroundColor: '#5C4A17',
   },
-  modeBtnTitle: { color: theme.colors.text, fontFamily: theme.fonts.title, fontSize: 14, textTransform: 'uppercase' },
+  modeBtnTitle: { color: palette.text, fontFamily: theme.fonts.title, fontSize: 14, textTransform: 'uppercase' },
   modeBtnTitleActive: { color: '#FFF8E8' },
-  modeBtnSub: { color: theme.colors.muted, fontFamily: theme.fonts.body, fontSize: 11 },
+  modeBtnSub: { color: palette.muted, fontFamily: theme.fonts.body, fontSize: 11 },
   modeBtnSubActive: { color: '#F2E7CB' },
   playerChip: {
     paddingVertical: 10,
     paddingHorizontal: 12,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: theme.colors.line,
-    backgroundColor: theme.colors.chip,
+    borderColor: palette.line,
+    backgroundColor: palette.chip,
   },
-  playerChipActive: { backgroundColor: theme.colors.accent, borderColor: theme.colors.accent },
-  playerText: { color: theme.colors.text, fontFamily: theme.fonts.title, fontSize: 12 },
+  playerChipActive: { backgroundColor: palette.accent, borderColor: palette.accent },
+  playerText: { color: palette.text, fontFamily: theme.fonts.title, fontSize: 12 },
   playerTextActive: { color: '#3A2500' },
   guestInput: { minHeight: 44 },
   rowTagInput: { flex: 1, minHeight: 44 },
@@ -1420,7 +1423,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 7,
   },
-  levelChipActive: { backgroundColor: theme.colors.accent, borderColor: theme.colors.accent },
+  levelChipActive: { backgroundColor: palette.accent, borderColor: palette.accent },
   levelChipText: { color: '#D5EAF8', fontFamily: theme.fonts.title, fontSize: 10, textTransform: 'uppercase' },
   levelChipTextActive: { color: '#3A2500' },
   addGuestBtn: {
@@ -1441,20 +1444,20 @@ const styles = StyleSheet.create({
   },
   guestBadgeText: { color: '#E7F5FF', fontFamily: theme.fonts.body, fontSize: 11 },
   optionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
-  optionLabel: { color: theme.colors.text, fontFamily: theme.fonts.title, fontSize: 14 },
+  optionLabel: { color: palette.text, fontFamily: theme.fonts.title, fontSize: 14 },
   serverBtn: {
     minHeight: 32,
     minWidth: 72,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: theme.colors.line,
+    borderColor: palette.line,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: theme.colors.bgAlt,
+    backgroundColor: palette.bgAlt,
     paddingHorizontal: 8,
   },
-  serverBtnActive: { backgroundColor: theme.colors.accent, borderColor: theme.colors.accent },
-  serverBtnText: { color: theme.colors.text, fontFamily: theme.fonts.title, fontSize: 12 },
+  serverBtnActive: { backgroundColor: palette.accent, borderColor: palette.accent },
+  serverBtnText: { color: palette.text, fontFamily: theme.fonts.title, fontSize: 12 },
   serverBtnTextActive: { color: '#3A2500' },
   fullBtn: {
     minHeight: 44,
@@ -1469,32 +1472,32 @@ const styles = StyleSheet.create({
     minHeight: 52,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: theme.colors.line,
-    color: theme.colors.text,
+    borderColor: palette.line,
+    color: palette.text,
     paddingHorizontal: 12,
-    backgroundColor: theme.colors.bgAlt,
+    backgroundColor: palette.bgAlt,
     fontFamily: theme.fonts.body,
   },
-  cta: { minHeight: 58, borderRadius: 14, backgroundColor: theme.colors.accent, justifyContent: 'center', alignItems: 'center' },
+  cta: { minHeight: 58, borderRadius: 14, backgroundColor: palette.accent, justifyContent: 'center', alignItems: 'center' },
   ctaText: { color: '#3A2500', fontFamily: theme.fonts.title, textTransform: 'uppercase', letterSpacing: 1, fontSize: 12 },
-  feedback: { color: theme.colors.warning, fontFamily: theme.fonts.title },
+  feedback: { color: palette.warning, fontFamily: theme.fonts.title },
   row: { flexDirection: 'row', gap: 8 },
   actionBtn: { flex: 1, minHeight: 46, borderRadius: 10, justifyContent: 'center', alignItems: 'center', marginTop: 8 },
   undoBtn: { backgroundColor: '#4C687B' },
   resetBtn: { backgroundColor: '#365A73' },
-  accept: { backgroundColor: theme.colors.accent },
-  reject: { backgroundColor: theme.colors.danger },
+  accept: { backgroundColor: palette.accent },
+  reject: { backgroundColor: palette.danger },
   actionText: { color: '#F8FBFF', fontFamily: theme.fonts.title, textTransform: 'uppercase', fontSize: 12 },
   rejectText: { color: '#3D0505' },
   matchCard: {
     borderWidth: 1,
-    borderColor: theme.colors.line,
+    borderColor: palette.line,
     borderRadius: 14,
     padding: 10,
     marginBottom: 8,
-    backgroundColor: theme.colors.bgAlt,
+    backgroundColor: palette.bgAlt,
   },
-  matchTitle: { color: theme.colors.text, fontFamily: theme.fonts.title, marginBottom: 4 },
+  matchTitle: { color: palette.text, fontFamily: theme.fonts.title, marginBottom: 4 },
   pirBox: {
     marginBottom: 8,
     borderRadius: 10,
@@ -1545,7 +1548,7 @@ const styles = StyleSheet.create({
   refInfoRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6, gap: 10 },
   refInfoRowPortrait: { flexDirection: 'column', alignItems: 'center', marginBottom: 10 },
   refInfoText: { color: '#D4E2ED', fontFamily: theme.fonts.title, fontSize: 14, textAlign: 'center' },
-  sideChange: { color: theme.colors.warning, fontFamily: theme.fonts.title, marginBottom: 6, textAlign: 'center' },
+  sideChange: { color: palette.warning, fontFamily: theme.fonts.title, marginBottom: 6, textAlign: 'center' },
 
   refBoard: { flex: 1, gap: 8 },
   refBoardPortrait: { flexDirection: 'column' },
@@ -1640,7 +1643,7 @@ const styles = StyleSheet.create({
     minHeight: 44,
     minWidth: 160,
     borderRadius: 10,
-    backgroundColor: theme.colors.accent,
+    backgroundColor: palette.accent,
     justifyContent: 'center',
     alignItems: 'center',
   },

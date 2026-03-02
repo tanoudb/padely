@@ -61,7 +61,7 @@ function lastActiveLabel(iso, t) {
   return t('community.matchmakingLastDays', { days });
 }
 
-function Avatar({ name, active = false }) {
+function Avatar({ name, active = false, styles }) {
   return (
     <View style={[styles.avatar, active && styles.avatarActive]}>
       <Text style={[styles.avatarText, active && styles.avatarTextActive]}>{initials(name)}</Text>
@@ -69,7 +69,7 @@ function Avatar({ name, active = false }) {
   );
 }
 
-function ChannelPill({ label, active, onPress }) {
+function ChannelPill({ label, active, onPress, styles }) {
   return (
     <Pressable style={[styles.channelPill, active && styles.channelPillActive]} onPress={onPress}>
       <Text style={[styles.channelPillText, active && styles.channelPillTextActive]}>{label}</Text>
@@ -77,12 +77,12 @@ function ChannelPill({ label, active, onPress }) {
   );
 }
 
-function PostCard({ item, mine, t }) {
+function PostCard({ item, mine, t, styles }) {
   return (
     <Card style={styles.postCard}>
       <View style={styles.postHead}>
         <View style={styles.postAuthorWrap}>
-          <Avatar name={item.senderName} active={mine} />
+          <Avatar name={item.senderName} active={mine} styles={styles} />
           <View>
             <Text style={styles.postAuthor}>{mine ? t('community.me') : item.senderName}</Text>
             <Text style={styles.postMeta}>{item.channelLabel} · {formatTime(item.createdAt)}</Text>
@@ -94,7 +94,7 @@ function PostCard({ item, mine, t }) {
   );
 }
 
-function DmBubble({ mine, text, createdAt }) {
+function DmBubble({ mine, text, createdAt, styles }) {
   return (
     <View style={[styles.dmBubble, mine ? styles.dmBubbleMine : styles.dmBubbleOther]}>
       <Text style={styles.dmBubbleText}>{text}</Text>
@@ -146,6 +146,7 @@ export function CommunityScreen() {
   const { token, user } = useSession();
   const { palette, mode } = useUi();
   const { t } = useI18n();
+  const styles = useMemo(() => createStyles(palette), [palette]);
 
   const [activeTab, setActiveTab] = useState('home');
   const [city, setCity] = useState(user.city ?? 'Lyon');
@@ -728,7 +729,7 @@ export function CommunityScreen() {
                   style={[styles.friendChip, selectedFriend === friend.id && styles.friendChipActive]}
                   onPress={() => setSelectedFriend(friend.id)}
                 >
-                  <Avatar name={friend.displayName} active={selectedFriend === friend.id} />
+                  <Avatar name={friend.displayName} active={selectedFriend === friend.id} styles={styles} />
                   <Text style={[styles.friendChipText, selectedFriend === friend.id && styles.friendChipTextActive]}>{friend.displayName}</Text>
                 </Pressable>
               ))}
@@ -748,6 +749,7 @@ export function CommunityScreen() {
                       mine={item.fromUserId === user.id}
                       text={item.text}
                       createdAt={item.createdAt}
+                      styles={styles}
                     />
                   ))}
                   {dmMessages.length === 0 ? <Text style={styles.emptyText}>{t('community.startPrivateChat')}</Text> : null}
@@ -776,7 +778,7 @@ export function CommunityScreen() {
               {suggestedPlayers.map((p) => (
                 <View key={p.id} style={styles.suggestRow}>
                   <Pressable style={styles.suggestLeft} onPress={() => openPlayerProfile(p)}>
-                    <Avatar name={p.displayName} />
+                    <Avatar name={p.displayName} styles={styles} />
                     <View>
                       <Text style={styles.suggestName}>{p.displayName}</Text>
                       <Text style={styles.suggestMeta}>{p.city ?? t('community.unknownCity')} · PIR {Math.round(p.rating)}</Text>
@@ -797,7 +799,7 @@ export function CommunityScreen() {
               {matchmakingSuggestions.map((suggestion) => (
                 <View key={suggestion.userId} style={styles.suggestRow}>
                   <Pressable style={styles.suggestLeft} onPress={() => openPlayerProfile({ id: suggestion.userId, displayName: suggestion.displayName })}>
-                    <Avatar name={suggestion.displayName} />
+                    <Avatar name={suggestion.displayName} styles={styles} />
                     <View>
                       <Text style={styles.suggestName}>{suggestion.displayName}</Text>
                       <Text style={styles.suggestMeta}>
@@ -844,7 +846,7 @@ export function CommunityScreen() {
             </View>
               <View style={styles.feedList}>
                 {homeFeed.map((item, index) => (
-                  <PostCard key={messageKey(item, index, 'home')} item={item} mine={item.senderId === user.id} t={t} />
+                  <PostCard key={messageKey(item, index, 'home')} item={item} mine={item.senderId === user.id} t={t} styles={styles} />
                 ))}
                 {homeFeed.length === 0 ? <Text style={styles.emptyText}>{t('community.noNews')}</Text> : null}
               </View>
@@ -880,7 +882,7 @@ export function CommunityScreen() {
               </Pressable>
             ) : null}
             {regionalFeed.map((item, index) => (
-              <PostCard key={messageKey(item, index, 'regional')} item={item} mine={item.senderId === user.id} t={t} />
+              <PostCard key={messageKey(item, index, 'regional')} item={item} mine={item.senderId === user.id} t={t} styles={styles} />
             ))}
             {regionalFeed.length === 0 ? <Text style={styles.emptyText}>{t('community.regionalEmpty')}</Text> : null}
           </View>
@@ -898,7 +900,7 @@ export function CommunityScreen() {
             <Text style={styles.sectionTitle}>{t('community.chooseChannel')}</Text>
             <View style={styles.pillsWrap}>
               {publicChannels.map((ch) => (
-                <ChannelPill key={ch.key} label={ch.title} active={selectedChannel === ch.key} onPress={() => setSelectedChannel(ch.key)} />
+                  <ChannelPill key={ch.key} label={ch.title} active={selectedChannel === ch.key} onPress={() => setSelectedChannel(ch.key)} styles={styles} />
               ))}
             </View>
 
@@ -935,7 +937,7 @@ export function CommunityScreen() {
                 </Pressable>
               ) : null}
               {selectedChannelFeed.map((item, index) => (
-                <PostCard key={messageKey(item, index, 'channel')} item={item} mine={item.senderId === user.id} t={t} />
+                <PostCard key={messageKey(item, index, 'channel')} item={item} mine={item.senderId === user.id} t={t} styles={styles} />
               ))}
               {selectedChannelFeed.length === 0 ? <Text style={styles.emptyText}>{t('community.channelEmpty')}</Text> : null}
             </View>
@@ -990,7 +992,7 @@ export function CommunityScreen() {
               <Text style={styles.sectionTitle}>{t('community.myClubs')}</Text>
               <View style={styles.pillsWrap}>
                 {clubChannels.map((ch) => (
-                  <ChannelPill key={ch.key} label={ch.title} active={selectedClubChannel === ch.key} onPress={() => setSelectedClubChannel(ch.key)} />
+                  <ChannelPill key={ch.key} label={ch.title} active={selectedClubChannel === ch.key} onPress={() => setSelectedClubChannel(ch.key)} styles={styles} />
                 ))}
               </View>
 
@@ -1015,7 +1017,7 @@ export function CommunityScreen() {
               </Pressable>
             ) : null}
             {clubFeed.map((item, index) => (
-              <PostCard key={messageKey(item, index, 'club')} item={item} mine={item.senderId === user.id} t={t} />
+              <PostCard key={messageKey(item, index, 'club')} item={item} mine={item.senderId === user.id} t={t} styles={styles} />
             ))}
             {clubFeed.length === 0 ? <Text style={styles.emptyText}>{t('community.clubFeedEmpty')}</Text> : null}
           </View>
@@ -1027,11 +1029,13 @@ export function CommunityScreen() {
                 label={t('community.periodSeason')}
                 active={rankingPeriod === 'season'}
                 onPress={() => setRankingPeriod('season')}
+                styles={styles}
               />
               <ChannelPill
                 label={t('community.periodAll')}
                 active={rankingPeriod === 'all'}
                 onPress={() => setRankingPeriod('all')}
+                styles={styles}
               />
             </View>
             {(localLeaderboard ?? []).slice(0, 8).map((row) => (
@@ -1057,7 +1061,8 @@ export function CommunityScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(palette) {
+  return StyleSheet.create({
   screen: {
     flex: 1,
   },
@@ -1075,22 +1080,22 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     padding: 14,
     borderWidth: 1,
-    borderColor: theme.colors.line,
+    borderColor: palette.line,
     gap: 8,
   },
   heroTitle: {
-    color: theme.colors.text,
+    color: palette.text,
     fontFamily: theme.fonts.display,
     fontSize: 30,
     lineHeight: 32,
   },
   heroGreeting: {
-    color: theme.colors.text,
+    color: palette.text,
     fontFamily: theme.fonts.title,
     fontSize: 15,
   },
   heroPitch: {
-    color: theme.colors.textSecondary,
+    color: palette.textSecondary,
     fontFamily: theme.fonts.body,
     fontSize: 12,
   },
@@ -1105,12 +1110,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: theme.colors.bgElevated,
+    backgroundColor: palette.bgElevated,
     borderWidth: 1,
-    borderColor: theme.colors.line,
+    borderColor: palette.line,
   },
   cityChipText: {
-    color: theme.colors.text,
+    color: palette.text,
     fontFamily: theme.fonts.title,
     fontSize: 11,
     textTransform: 'uppercase',
@@ -1123,11 +1128,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: theme.colors.line,
-    backgroundColor: theme.colors.bgAlt,
+    borderColor: palette.line,
+    backgroundColor: palette.bgAlt,
   },
   cityRefreshChipText: {
-    color: theme.colors.text,
+    color: palette.text,
     fontFamily: theme.fonts.title,
     fontSize: 11,
     textTransform: 'uppercase',
@@ -1144,15 +1149,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: theme.colors.line,
-    backgroundColor: theme.colors.bgAlt,
+    borderColor: palette.line,
+    backgroundColor: palette.bgAlt,
   },
   cityPresetActive: {
-    borderColor: theme.colors.accent,
-    backgroundColor: theme.colors.accent,
+    borderColor: palette.accent,
+    backgroundColor: palette.accent,
   },
   cityPresetText: {
-    color: theme.colors.textSecondary,
+    color: palette.textSecondary,
     fontFamily: theme.fonts.title,
     fontSize: 11,
   },
@@ -1168,18 +1173,18 @@ const styles = StyleSheet.create({
     minHeight: 38,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: theme.colors.line,
-    backgroundColor: theme.colors.chip,
+    borderColor: palette.line,
+    backgroundColor: palette.chip,
     paddingHorizontal: 12,
     justifyContent: 'center',
     alignItems: 'center',
   },
   topTabActive: {
-    borderColor: theme.colors.accent,
-    backgroundColor: theme.colors.accent,
+    borderColor: palette.accent,
+    backgroundColor: palette.accent,
   },
   topTabText: {
-    color: theme.colors.text,
+    color: palette.text,
     fontFamily: theme.fonts.title,
     fontSize: 11,
     textTransform: 'uppercase',
@@ -1191,7 +1196,7 @@ const styles = StyleSheet.create({
   banner: {
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: theme.colors.line,
+    borderColor: palette.line,
     padding: 12,
     gap: 4,
   },
@@ -1206,7 +1211,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   sectionTitle: {
-    color: theme.colors.text,
+    color: palette.text,
     fontFamily: theme.fonts.title,
     fontSize: 16,
     marginBottom: 8,
@@ -1222,40 +1227,40 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     borderWidth: 1,
-    borderColor: theme.colors.line,
+    borderColor: palette.line,
     borderRadius: 14,
     paddingHorizontal: 8,
     paddingVertical: 6,
-    backgroundColor: theme.colors.bgElevated,
+    backgroundColor: palette.bgElevated,
   },
   friendChipActive: {
-    borderColor: theme.colors.accent2,
-    backgroundColor: `${theme.colors.accent2}22`,
+    borderColor: palette.accent2,
+    backgroundColor: `${palette.accent2}22`,
   },
   friendChipText: {
-    color: theme.colors.text,
+    color: palette.text,
     fontFamily: theme.fonts.title,
     fontSize: 12,
   },
   friendChipTextActive: {
-    color: theme.colors.text,
+    color: palette.text,
   },
   avatar: {
     width: 30,
     height: 30,
     borderRadius: 15,
     borderWidth: 1,
-    borderColor: theme.colors.line,
-    backgroundColor: theme.colors.bgAlt,
+    borderColor: palette.line,
+    backgroundColor: palette.bgAlt,
     justifyContent: 'center',
     alignItems: 'center',
   },
   avatarActive: {
-    borderColor: theme.colors.accent,
-    backgroundColor: theme.colors.accent,
+    borderColor: palette.accent,
+    backgroundColor: palette.accent,
   },
   avatarText: {
-    color: theme.colors.textSecondary,
+    color: palette.textSecondary,
     fontFamily: theme.fonts.title,
     fontSize: 10,
   },
@@ -1264,10 +1269,10 @@ const styles = StyleSheet.create({
   },
   dmBox: {
     borderWidth: 1,
-    borderColor: theme.colors.line,
+    borderColor: palette.line,
     borderRadius: 12,
     minHeight: 120,
-    backgroundColor: theme.colors.bgAlt,
+    backgroundColor: palette.bgAlt,
     padding: 10,
     gap: 8,
   },
@@ -1276,12 +1281,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 999,
-    backgroundColor: `${theme.colors.accent2}33`,
+    backgroundColor: `${palette.accent2}33`,
     borderWidth: 1,
-    borderColor: `${theme.colors.accent2}66`,
+    borderColor: `${palette.accent2}66`,
   },
   loadMoreBtnText: {
-    color: theme.colors.accent2,
+    color: palette.accent2,
     fontFamily: theme.fonts.title,
     fontSize: 11,
     letterSpacing: 0.4,
@@ -1295,7 +1300,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   dmBubbleMine: {
-    backgroundColor: theme.colors.accent2,
+    backgroundColor: palette.accent2,
     alignSelf: 'flex-end',
   },
   dmBubbleOther: {
@@ -1308,7 +1313,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   dmTime: {
-    color: theme.colors.muted,
+    color: palette.muted,
     fontFamily: theme.fonts.mono,
     fontSize: 10,
     alignSelf: 'flex-end',
@@ -1323,9 +1328,9 @@ const styles = StyleSheet.create({
     minHeight: 48,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: theme.colors.line,
-    backgroundColor: theme.colors.bgAlt,
-    color: theme.colors.text,
+    borderColor: palette.line,
+    backgroundColor: palette.bgAlt,
+    color: palette.text,
     paddingHorizontal: 12,
     fontFamily: theme.fonts.body,
     fontSize: 14,
@@ -1343,7 +1348,7 @@ const styles = StyleSheet.create({
     minHeight: 44,
     minWidth: 96,
     borderRadius: 12,
-    backgroundColor: theme.colors.accent,
+    backgroundColor: palette.accent,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 10,
@@ -1360,14 +1365,14 @@ const styles = StyleSheet.create({
     minWidth: 92,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: theme.colors.line,
-    backgroundColor: theme.colors.bgAlt,
+    borderColor: palette.line,
+    backgroundColor: palette.bgAlt,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 10,
   },
   secondaryBtnText: {
-    color: theme.colors.text,
+    color: palette.text,
     fontFamily: theme.fonts.title,
     textTransform: 'uppercase',
     fontSize: 11,
@@ -1378,7 +1383,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     borderBottomWidth: 1,
-    borderBottomColor: theme.colors.line,
+    borderBottomColor: palette.line,
     paddingVertical: 8,
     gap: 8,
   },
@@ -1389,19 +1394,19 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   suggestName: {
-    color: theme.colors.text,
+    color: palette.text,
     fontFamily: theme.fonts.title,
     fontSize: 14,
   },
   suggestMeta: {
-    color: theme.colors.muted,
+    color: palette.muted,
     fontFamily: theme.fonts.body,
     fontSize: 11,
   },
   addBtn: {
     minHeight: 32,
     borderRadius: 8,
-    backgroundColor: theme.colors.accent2,
+    backgroundColor: palette.accent2,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 10,
@@ -1409,7 +1414,7 @@ const styles = StyleSheet.create({
   proposeBtn: {
     minHeight: 32,
     borderRadius: 8,
-    backgroundColor: theme.colors.accent,
+    backgroundColor: palette.accent,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 10,
@@ -1440,17 +1445,17 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   postAuthor: {
-    color: theme.colors.text,
+    color: palette.text,
     fontFamily: theme.fonts.title,
     fontSize: 13,
   },
   postMeta: {
-    color: theme.colors.muted,
+    color: palette.muted,
     fontFamily: theme.fonts.body,
     fontSize: 11,
   },
   postText: {
-    color: theme.colors.text,
+    color: palette.text,
     fontFamily: theme.fonts.body,
     fontSize: 14,
     lineHeight: 18,
@@ -1463,18 +1468,18 @@ const styles = StyleSheet.create({
   },
   channelPill: {
     borderWidth: 1,
-    borderColor: theme.colors.line,
-    backgroundColor: theme.colors.bgElevated,
+    borderColor: palette.line,
+    backgroundColor: palette.bgElevated,
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 7,
   },
   channelPillActive: {
-    borderColor: theme.colors.accent,
-    backgroundColor: theme.colors.accent,
+    borderColor: palette.accent,
+    backgroundColor: palette.accent,
   },
   channelPillText: {
-    color: theme.colors.textSecondary,
+    color: palette.textSecondary,
     fontFamily: theme.fonts.title,
     fontSize: 10,
     textTransform: 'uppercase',
@@ -1493,20 +1498,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 7,
     borderBottomWidth: 1,
-    borderBottomColor: theme.colors.line,
+    borderBottomColor: palette.line,
   },
   clubName: {
-    color: theme.colors.text,
+    color: palette.text,
     fontFamily: theme.fonts.title,
     fontSize: 13,
   },
   clubMeta: {
-    color: theme.colors.muted,
+    color: palette.muted,
     fontFamily: theme.fonts.body,
     fontSize: 11,
   },
   clubState: {
-    color: theme.colors.accent,
+    color: palette.accent,
     fontFamily: theme.fonts.mono,
     fontSize: 11,
   },
@@ -1515,16 +1520,16 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     borderBottomWidth: 1,
-    borderBottomColor: theme.colors.line,
+    borderBottomColor: palette.line,
     paddingVertical: 7,
   },
   rankName: {
-    color: theme.colors.text,
+    color: palette.text,
     fontFamily: theme.fonts.title,
     fontSize: 13,
   },
   rankScore: {
-    color: theme.colors.accent,
+    color: palette.accent,
     fontFamily: theme.fonts.mono,
     fontSize: 12,
   },
@@ -1534,19 +1539,20 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   emptyText: {
-    color: theme.colors.muted,
+    color: palette.muted,
     fontFamily: theme.fonts.body,
     fontSize: 12,
     marginTop: 4,
   },
   error: {
-    color: theme.colors.danger,
+    color: palette.danger,
     fontFamily: theme.fonts.body,
     fontSize: 12,
   },
   feedback: {
-    color: theme.colors.accent2,
+    color: palette.accent2,
     fontFamily: theme.fonts.body,
     fontSize: 12,
   },
-});
+  });
+}

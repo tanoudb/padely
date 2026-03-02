@@ -7,6 +7,7 @@ import { refreshCityLeaderboard } from './communityService.js';
 import { closeLiveMatchSession } from './liveMatchService.js';
 import { sendPushToUsers } from './pushService.js';
 import { evaluateBadges } from './gamificationService.js';
+import { evaluateAndPersistPlayerProfile } from './playerProfileService.js';
 
 function pairKey(team) {
   return [...team].sort().join(':');
@@ -286,6 +287,23 @@ async function notifyBadgeUnlocks(userId, matchId, evaluation) {
       data: {
         type: 'badge_unlocked',
         badgeKey: item.badgeKey,
+        tier: item.tier ?? null,
+        profileUserId: userId,
+        matchId,
+      },
+    });
+  }
+
+  const upgrades = Array.isArray(evaluation?.tierUpgrades) ? evaluation.tierUpgrades : [];
+  for (const item of upgrades) {
+    await sendPushToUsers([userId], {
+      title: 'Badge evolue',
+      body: `${item.badgeKey}: ${item.oldTier} -> ${item.newTier}`,
+      data: {
+        type: 'badge_tier_up',
+        badgeKey: item.badgeKey,
+        oldTier: item.oldTier,
+        newTier: item.newTier,
         profileUserId: userId,
         matchId,
       },
@@ -294,6 +312,7 @@ async function notifyBadgeUnlocks(userId, matchId, evaluation) {
 }
 
 async function refreshBadgesAfterValidation(userIds = [], matchId, source) {
+  const evaluations = new Map();
   for (const userId of [...new Set(userIds.filter(Boolean))]) {
     try {
       const evaluation = await evaluateBadges(userId, {
@@ -301,10 +320,92 @@ async function refreshBadgesAfterValidation(userIds = [], matchId, source) {
         matchId,
       });
       await notifyBadgeUnlocks(userId, matchId, evaluation);
+      evaluations.set(userId, evaluation);
     } catch {
       // Badge computation never blocks match lifecycle.
     }
   }
+  return evaluations;
+}
+
+async function refreshPlayerProfilesAfterMatch(userIds = []) {
+  for (const userId of [...new Set(userIds.filter(Boolean))]) {
+    try {
+      await evaluateAndPersistPlayerProfile(userId);
+    } catch {
+      // Player profile computation never blocks match lifecycle.
+    }
+  }
+}
+
+async function notifyKeyMatch(match) {
+  if (!match?.isKeyMatch) {
+    return;
+  }
+  const targets = [...new Set(match.players ?? [])];
+  if (!targets.length) {
+    return;
+  }
+  await sendPushToUsers(targets, {
+    title: 'Match cle',
+    body: 'Ce match etait tres serre contre un niveau proche.',
+    data: {
+      type: 'key_match',
+      matchId: match.id,
+      stressTag: match.stressTag ?? null,
+    },
+  });
+}
+
+async function maybeNotifyRivalryAlert(createdMatch) {
+  const participants = [...new Set(createdMatch.players ?? [])];
+  if (!participants.length) {
+    return;
+  }
+
+  for (const userId of participants) {
+    const user = await store.getUserById(userId);
+    const rivalries = Array.isArray(user?.playerProfile?.rivalries) ? user.playerProfile.rivalries : [];
+    const opponents = participants.filter((id) => id !== userId);
+    const hardRival = rivalries.find((row) => opponents.includes(row.opponentId) && Number(row.wins ?? 0) === 0 && Number(row.losses ?? 0) >= 2);
+    if (!hardRival) {
+      continue;
+    }
+    await sendPushToUsers([userId], {
+      title: 'Rivalite',
+      body: 'Tu n as jamais battu cet adversaire. Match a enjeu.',
+      data: {
+        type: 'rivalry_alert',
+        matchId: createdMatch.id,
+        opponentId: hardRival.opponentId,
+        losses: hardRival.losses,
+      },
+    });
+  }
+}
+
+async function detectRivalryBreak(match, userIds, winnerSide) {
+  for (const userId of userIds) {
+    const isTeamA = (match.teamA ?? []).includes(userId);
+    const userWon = (isTeamA && winnerSide === 'A') || (!isTeamA && winnerSide === 'B');
+    if (!userWon) {
+      continue;
+    }
+
+    const opponents = (isTeamA ? (match.teamB ?? []) : (match.teamA ?? []))
+      .filter((id) => (match.players ?? []).includes(id));
+    if (!opponents.length) {
+      continue;
+    }
+
+    const user = await store.getUserById(userId);
+    const rivalries = Array.isArray(user?.playerProfile?.rivalries) ? user.playerProfile.rivalries : [];
+    const broken = rivalries.some((row) => opponents.includes(row.opponentId) && Number(row.wins ?? 0) === 0 && Number(row.losses ?? 0) >= 2);
+    if (broken) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function createEnginePlayer(slot, watch, usersById, partnerSlot, pairRating) {
@@ -501,6 +602,56 @@ function toSigned(value) {
   return num.toFixed(2);
 }
 
+function average(values = []) {
+  if (!values.length) {
+    return 0;
+  }
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function teamAverageRatingFromSlots(teamSlots, usersById) {
+  const values = teamSlots
+    .map((slot) => {
+      if (slot.kind === 'guest') {
+        return Number(slot.guestRating ?? 1200);
+      }
+      return Number(usersById.get(slot.userId)?.rating ?? 1200);
+    })
+    .filter((value) => Number.isFinite(value) && value > 0);
+  return average(values);
+}
+
+function computeStressTag(sets, teamARating, teamBRating) {
+  const safeSets = Array.isArray(sets) ? sets : [];
+  const totalGames = safeSets.reduce((sum, set) => sum + Number(set?.a ?? 0) + Number(set?.b ?? 0), 0);
+  const margin = Math.abs(safeSets.reduce((sum, set) => sum + Number(set?.a ?? 0) - Number(set?.b ?? 0), 0));
+  const ratingDiff = Math.abs(Number(teamARating ?? 0) - Number(teamBRating ?? 0));
+
+  if (totalGames <= 0) {
+    return 'controlled';
+  }
+  if (margin >= totalGames * 0.5) return 'easy';
+  if (margin >= totalGames * 0.25) return 'controlled';
+  if (ratingDiff < 100 && margin < totalGames * 0.15) return 'chaos';
+  return 'battle';
+}
+
+function computeIsKeyMatch(sets, teamARating, teamBRating, rivalryBreak = false) {
+  const safeSets = Array.isArray(sets) ? sets : [];
+  const margin = Math.abs(safeSets.reduce((sum, set) => sum + Number(set?.a ?? 0) - Number(set?.b ?? 0), 0));
+  const ratingDiff = Math.abs(Number(teamARating ?? 0) - Number(teamBRating ?? 0));
+  if (rivalryBreak) {
+    return true;
+  }
+  return margin < 4 && ratingDiff < 120;
+}
+
+function winnerSideFromSets(sets = []) {
+  const wonA = sets.filter((set) => Number(set?.a ?? 0) > Number(set?.b ?? 0)).length;
+  const wonB = sets.filter((set) => Number(set?.b ?? 0) > Number(set?.a ?? 0)).length;
+  return wonA >= wonB ? 'A' : 'B';
+}
+
 function buildPirImpact(match, userId) {
   if (!match?.ratingResult || match.mode !== 'ranked') {
     return null;
@@ -556,6 +707,10 @@ export async function createMatch(payload, createdBy) {
   }
 
   const usersById = await buildUsersById(userIds);
+  const teamARating = teamAverageRatingFromSlots(teamA, usersById);
+  const teamBRating = teamAverageRatingFromSlots(teamB, usersById);
+  const stressTag = computeStressTag(payload.sets ?? [], teamARating, teamBRating);
+  const isKeyMatch = computeIsKeyMatch(payload.sets ?? [], teamARating, teamBRating, false);
   const watchByPlayerInput = payload.watchByPlayer ?? {};
   const watchByPlayer = {};
   for (const slot of [...teamA, ...teamB]) {
@@ -606,6 +761,8 @@ export async function createMatch(payload, createdBy) {
       teamA: teamA.map((slot) => slotSnapshot(slot, usersById)),
       teamB: teamB.map((slot) => slotSnapshot(slot, usersById)),
     },
+    stressTag,
+    isKeyMatch,
   });
 
   if (payload.liveMatchId) {
@@ -630,18 +787,25 @@ export async function createMatch(payload, createdBy) {
         accepted: 0,
       },
       validatedAt: new Date().toISOString(),
+      stressTag,
+      isKeyMatch,
     });
     await refreshBadgesAfterValidation(friendlyMatch.players ?? [], friendlyMatch.id, 'friendly_match_validated');
+    await refreshPlayerProfilesAfterMatch(friendlyMatch.players ?? []);
+    await notifyKeyMatch(friendlyMatch);
+    await maybeNotifyRivalryAlert(friendlyMatch);
     await notifyMatchCreated(friendlyMatch);
     return friendlyMatch;
   }
 
   if (requiredValidations === 0) {
     const rated = await rateValidatedMatch(created.id);
+    await maybeNotifyRivalryAlert(rated);
     await notifyMatchCreated(rated);
     return rated;
   }
 
+  await maybeNotifyRivalryAlert(created);
   await notifyMatchCreated(created);
   return created;
 }
@@ -712,13 +876,26 @@ export async function rateValidatedMatch(matchId) {
   }
 
   if (match.mode === 'friendly' || match.isRated === false) {
+    const teamASlots = participantsForMatch(match, 'teamA');
+    const teamBSlots = participantsForMatch(match, 'teamB');
+    const userIds = extractUserIds(teamASlots, teamBSlots);
+    const usersById = userIds.length ? await buildUsersById(userIds) : new Map();
+    const teamARating = teamAverageRatingFromSlots(teamASlots, usersById);
+    const teamBRating = teamAverageRatingFromSlots(teamBSlots, usersById);
+    const stressTag = computeStressTag(match.sets ?? [], teamARating, teamBRating);
+    const rivalryBreak = await detectRivalryBreak(match, userIds, winnerSideFromSets(match.sets ?? []));
+    const isKeyMatch = computeIsKeyMatch(match.sets ?? [], teamARating, teamBRating, rivalryBreak);
     const validated = await store.updateMatch(matchId, {
       status: 'validated',
       rated: false,
       ratingResult: null,
       validatedAt: new Date().toISOString(),
+      stressTag,
+      isKeyMatch,
     });
     await refreshBadgesAfterValidation(validated.players ?? [], validated.id, 'match_validated');
+    await refreshPlayerProfilesAfterMatch(validated.players ?? []);
+    await notifyKeyMatch(validated);
     return validated;
   }
 
@@ -757,6 +934,12 @@ export async function rateValidatedMatch(matchId) {
     teamA,
     teamB,
   });
+
+  const teamARating = average(teamA.map((entry) => Number(entry?.rating ?? 1200)).filter((value) => Number.isFinite(value) && value > 0));
+  const teamBRating = average(teamB.map((entry) => Number(entry?.rating ?? 1200)).filter((value) => Number.isFinite(value) && value > 0));
+  const stressTag = computeStressTag(match.sets ?? [], teamARating, teamBRating);
+  const rivalryBreak = await detectRivalryBreak(match, userIds, result.summary?.winner ?? winnerSideFromSets(match.sets ?? []));
+  const isKeyMatch = computeIsKeyMatch(match.sets ?? [], teamARating, teamBRating, rivalryBreak);
 
   for (const update of [...result.teamA, ...result.teamB]) {
     if (String(update.id).startsWith('guest:')) {
@@ -806,6 +989,8 @@ export async function rateValidatedMatch(matchId) {
     rated: true,
     ratingResult: result,
     validatedAt: new Date().toISOString(),
+    stressTag,
+    isKeyMatch,
   });
 
   const affectedCities = [...new Set(userIds
@@ -813,6 +998,8 @@ export async function rateValidatedMatch(matchId) {
     .filter((city) => String(city ?? '').trim().length > 0))];
   await notifyLeaderboardMovement(affectedCities, matchId);
   await refreshBadgesAfterValidation(userIds, validatedMatch.id, 'match_validated');
+  await refreshPlayerProfilesAfterMatch(userIds);
+  await notifyKeyMatch(validatedMatch);
 
   return validatedMatch;
 }

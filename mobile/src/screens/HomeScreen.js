@@ -28,6 +28,7 @@ import { useSession } from '../state/session';
 import { useUi } from '../state/ui';
 import { theme } from '../theme';
 import { configureEngagementNotifications } from '../utils/notifications';
+import { getContextualMessage } from '../utils/playerContext';
 
 function rankFromRating(rating) {
   if (rating >= 2100) return 'Or I';
@@ -69,6 +70,21 @@ function countStreakDays(matches) {
   return streak;
 }
 
+function preferredDayLabel(matches, t) {
+  const dayCounts = new Map();
+  for (const match of matches) {
+    const raw = match?.validatedAt ?? match?.createdAt;
+    const date = new Date(raw ?? 0);
+    if (Number.isNaN(date.getTime())) continue;
+    const key = date.getDay();
+    dayCounts.set(key, Number(dayCounts.get(key) ?? 0) + 1);
+  }
+  const sorted = [...dayCounts.entries()].sort((a, b) => b[1] - a[1]);
+  if (!sorted.length) return null;
+  const day = sorted[0][0];
+  return t(`home.dayName_${day}`);
+}
+
 function isUnauthorizedErrorMessage(message) {
   const raw = String(message ?? '').toLowerCase();
   return raw.includes('authentication required')
@@ -86,6 +102,7 @@ export function HomeScreen() {
   const { language, setLanguage, t } = useI18n();
 
   const [dashboard, setDashboard] = useState(null);
+  const [playerProfilePack, setPlayerProfilePack] = useState(null);
   const [recentMatches, setRecentMatches] = useState([]);
   const [cityLeaderboards, setCityLeaderboards] = useState(null);
   const [seasons, setSeasons] = useState(null);
@@ -116,27 +133,18 @@ export function HomeScreen() {
     navigation.getParent()?.navigate('CommunityTab', { screen: 'CommunityMain' });
   }
 
-  function openPlayerProfile(player) {
-    if (!player?.userId) return;
-    navigation.getParent()?.navigate('CommunityTab', {
-      screen: 'PlayerProfile',
-      params: {
-        playerId: player.userId,
-        playerName: player.displayName,
-      },
-    });
-  }
-
   const loadHome = useCallback(async () => {
     setLoadError('');
     try {
-      const [dash, periods, matchesOut, seasonsOut] = await Promise.all([
+      const [dash, profilePack, periods, matchesOut, seasonsOut] = await Promise.all([
         api.dashboard(token, user.id),
+        api.playerProfile(token),
         api.leaderboardPeriods(token, user.city ?? 'Lyon'),
         api.listMyMatches(token),
         api.seasons(token, user.city ?? 'Lyon'),
       ]);
       setDashboard(dash);
+      setPlayerProfilePack(profilePack);
       setCityLeaderboards(periods);
       setRecentMatches(matchesOut);
       setSeasons(seasonsOut);
@@ -177,15 +185,19 @@ export function HomeScreen() {
 
   const winRate = useMemo(() => (matches ? Math.round((wins / matches) * 100) : 0), [wins, matches]);
   const streakDays = useMemo(() => countStreakDays(recentMatches), [recentMatches]);
-  const formScore = Number(dashboard?.form?.score ?? 0);
-  const playerProfileType = dashboard?.playerProfileType ?? 'regular';
-  const smartStreak = dashboard?.smartStreak ?? null;
+  const formScore = Number(playerProfilePack?.playerProfile?.formScore ?? dashboard?.form?.score ?? 0);
+  const playerProfileType = playerProfilePack?.playerProfile?.type ?? dashboard?.playerProfileType ?? 'regular';
+  const smartStreak = playerProfilePack?.playerProfile?.activityStreak ?? dashboard?.smartStreak ?? null;
   const streakCount = Number(smartStreak?.count ?? streakDays);
   const streakUnit = smartStreak?.unit ?? 'day';
-  const returnMode = dashboard?.returnMode ?? null;
-  const adaptiveObjective = dashboard?.adaptiveObjective ?? null;
+  const returnMode = playerProfilePack?.playerProfile?.comebackMode ?? dashboard?.returnMode ?? null;
+  const adaptiveObjective = playerProfilePack?.playerProfile?.objective ?? dashboard?.adaptiveObjective ?? null;
   const latestMatchInsight = dashboard?.latestMatchInsight ?? null;
   const playerTypeLabel = t(`home.profileType_${playerProfileType}`);
+  const contextualMoment = useMemo(
+    () => getContextualMessage(playerProfilePack, t),
+    [playerProfilePack, t],
+  );
   const streakLabel = useMemo(() => {
     if (streakUnit === 'month') return t('home.streakMonths');
     if (streakUnit === 'week') return t('home.streakWeeks');
@@ -196,7 +208,19 @@ export function HomeScreen() {
     if (!adaptiveObjective) {
       return t('home.objectiveFallback');
     }
-    if (adaptiveObjective.mode === 'return') {
+    if (adaptiveObjective.type === 'comeback') {
+      return t('home.objectiveReturnSimple', {
+        current: adaptiveObjective.current ?? 0,
+        target: adaptiveObjective.target ?? 0,
+      });
+    }
+    if (adaptiveObjective.type === 'consistency' || adaptiveObjective.type === 'volume') {
+      return t('home.objectiveProgress', {
+        current: adaptiveObjective.current ?? 0,
+        target: adaptiveObjective.target ?? 0,
+      });
+    }
+    if (adaptiveObjective.mode === 'return' || adaptiveObjective.type === 'comeback') {
       return t('home.objectiveReturn', {
         count: adaptiveObjective.targetActivities,
         days: adaptiveObjective.windowDays,
@@ -239,6 +263,7 @@ export function HomeScreen() {
   const isLoading = !dashboard && !cityLeaderboards && !seasons;
   const pirLive = useCountUp(pir);
   const ratingLive = useCountUp(rating);
+  const formLive = useCountUp(formScore);
   const choiceActiveStyle = { backgroundColor: palette.accent, borderColor: palette.accent };
   const choiceActiveTextStyle = { color: palette.accentText };
   const heroEntry = useStaggeredEntry(0, !isLoading);
@@ -286,6 +311,11 @@ export function HomeScreen() {
         notifLeaderboard,
         playerRhythm,
         language: languageChoice,
+        contextual: {
+          preferredDayLabel: preferredDayLabel(recentMatches, t),
+          nearBestStreak: streakCount >= 4,
+          pausePatternDays: returnMode?.daysSinceLastMatch ?? 0,
+        },
       });
       if (notifState.enabled) {
         setSaveFeedback(t('home.notifSaved', { count: notifState.scheduled }));
@@ -367,14 +397,15 @@ export function HomeScreen() {
               <AnimatedView style={heroEntry}>
                 <Card elevated style={styles.heroCard}>
                   <View style={styles.heroHead}>
-                    <Text style={[styles.eyebrow, { color: palette.accent2 }]}>{t('home.pirLive')}</Text>
+                    <Text style={[styles.eyebrow, { color: palette.accent2 }]}>{t('home.formScore', { score: formLive })}</Text>
                     <RankBadge rank={rankFromRating(rating)} />
                   </View>
-                  <Text style={[styles.heroMetric, { color: palette.text }]}>{`PIR ${pirLive} · ${t('home.heroRank', { rank: rankFromRating(rating), rating: ratingLive })}`}</Text>
+                  <Text style={[styles.formMega, { color: palette.text }]}>{formLive}</Text>
                   <Text style={[styles.heroMeta, { color: palette.textSecondary }]}>
                     {t('home.formLine', { form: formScore, profile: playerTypeLabel })}
                   </Text>
-                  <PirGauge pir={pir} delta={lastDelta} rank={rankFromRating(rating)} size={160} strokeWidth={8} />
+                  <PirGauge pir={formScore} delta={0} rank={playerTypeLabel} size={170} strokeWidth={9} />
+                  <Text style={[styles.heroMetric, { color: palette.text }]}>{`PIR ${pirLive} · ${t('home.heroRank', { rank: rankFromRating(rating), rating: ratingLive })}`}</Text>
                   <PirSparkline data={pirHistory} />
                   <View style={styles.pillsRow}>
                     <StatPill value={wins} label={t('home.wins')} />
@@ -386,11 +417,16 @@ export function HomeScreen() {
 
               <AnimatedView style={objectiveEntry}>
                 <Card elevated>
-                  <Text style={[styles.sectionTitle, { color: palette.text }]}>{t('home.objectiveTitle')}</Text>
-                  <Text style={[styles.boardMeta, { color: palette.textSecondary }]}>{objectiveLabel}</Text>
+                  <Text style={[styles.sectionTitle, { color: palette.text }]}>{t('home.momentTitle')}</Text>
+                  <Text style={[styles.boardMeta, { color: palette.textSecondary }]}>{contextualMoment.title}</Text>
+                  <Text style={[styles.objectiveMeta, { color: palette.text }]}>{contextualMoment.subtitle}</Text>
+                  <Text style={[styles.objectiveMeta, { color: palette.textSecondary }]}>{objectiveLabel}</Text>
                   {returnMode?.active ? (
                     <Text style={[styles.objectiveMeta, { color: palette.accent2 }]}>
-                      {t('home.returnModeLine', { days: returnMode.pauseDays, bonus: returnMode.bonusForm })}
+                      {t('home.returnModeLine', {
+                        days: returnMode.pauseDays ?? returnMode.daysSinceLastMatch ?? 0,
+                        bonus: returnMode.bonusForm ?? (returnMode.bonusApplied ? 1 : 0),
+                      })}
                     </Text>
                   ) : null}
                   {latestMatchInsight ? (
@@ -416,10 +452,10 @@ export function HomeScreen() {
                   <Text style={[styles.sectionTitle, { color: palette.text }]}>{t('home.launchTitle')}</Text>
                   <View style={styles.quickRow}>
                     <Pressable style={[styles.quickBtnPrimary, { backgroundColor: palette.accent }]} onPress={goPlaySetup}>
-                      <Text style={[styles.quickBtnPrimaryText, { color: palette.accentText }]}>{t('home.launchRanked')}</Text>
+                      <Text style={[styles.quickBtnPrimaryText, { color: palette.accentText }]}>{t('home.playNow')}</Text>
                     </Pressable>
-                    <Pressable style={[styles.quickBtnGhost, { borderColor: palette.line, backgroundColor: palette.chip }]} onPress={goCommunity}>
-                      <Text style={[styles.quickBtnGhostText, { color: palette.text }]}>{t('home.launchFind')}</Text>
+                    <Pressable style={[styles.quickBtnGhost, { borderColor: palette.line, backgroundColor: palette.accent2Muted }]} onPress={goCommunity}>
+                      <Text style={[styles.quickBtnGhostText, { color: palette.text }]}>{t('home.findMatch')}</Text>
                     </Pressable>
                   </View>
                 </Card>
@@ -429,7 +465,9 @@ export function HomeScreen() {
                 <Card>
                   <View style={styles.boardHead}>
                     <Text style={[styles.sectionTitle, { color: palette.text }]}>{t('home.cityTop3', { city: user.city ?? 'Lyon' })}</Text>
-                    <Text style={[styles.boardMeta, { color: palette.textSecondary ?? palette.muted }]}>{t('home.monthRank')}</Text>
+                    <Pressable onPress={goCommunity}>
+                      <Text style={[styles.boardMeta, { color: palette.accent }]}>{t('home.openCommunity')}</Text>
+                    </Pressable>
                   </View>
                   <View style={styles.boardRows}>
                     {topRows.map((row) => (
@@ -437,7 +475,7 @@ export function HomeScreen() {
                         key={row.userId}
                         row={row}
                         podium
-                        onPress={openPlayerProfile}
+                        onPress={goCommunity}
                         isCurrentUser={row.userId === user.id}
                         currentUserLabel={t('home.you')}
                       />
@@ -655,6 +693,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
+  formMega: {
+    marginTop: -2,
+    fontFamily: theme.fonts.display,
+    fontSize: 62,
+    lineHeight: 64,
+    textAlign: 'center',
+  },
   heroMetric: { fontFamily: theme.fonts.body, fontSize: 12 },
   heroMeta: { fontFamily: theme.fonts.body, fontSize: 12 },
   objectiveMeta: { marginTop: 6, fontFamily: theme.fonts.body, fontSize: 12 },
@@ -662,8 +707,8 @@ const styles = StyleSheet.create({
   quickRow: { flexDirection: 'row', gap: 8, marginTop: 6 },
   quickBtnPrimary: {
     flex: 1,
-    minHeight: 52,
-    borderRadius: 14,
+    minHeight: 56,
+    borderRadius: 26,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -675,8 +720,8 @@ const styles = StyleSheet.create({
   },
   quickBtnGhost: {
     flex: 1,
-    minHeight: 52,
-    borderRadius: 14,
+    minHeight: 56,
+    borderRadius: 26,
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,

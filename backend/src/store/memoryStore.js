@@ -19,6 +19,44 @@ function makeArcadeTag(displayName, id) {
   return `${base}#${suffix}`;
 }
 
+const BADGE_TIER_ORDER = ['bronze', 'silver', 'gold', 'mythic'];
+
+function normalizeBadgeTier(value, fallback = 'gold') {
+  const raw = String(value ?? '').toLowerCase();
+  return BADGE_TIER_ORDER.includes(raw) ? raw : fallback;
+}
+
+function higherBadgeTier(currentTier, nextTier) {
+  const currentIndex = BADGE_TIER_ORDER.indexOf(normalizeBadgeTier(currentTier, 'bronze'));
+  const nextIndex = BADGE_TIER_ORDER.indexOf(normalizeBadgeTier(nextTier, 'bronze'));
+  return nextIndex > currentIndex ? normalizeBadgeTier(nextTier, 'bronze') : normalizeBadgeTier(currentTier, 'bronze');
+}
+
+const DEFAULT_PLAYER_PROFILE = {
+  type: 'chill',
+  typeOverride: null,
+  personality: null,
+  lastEvaluatedAt: null,
+  formScore: 0,
+  activityStreak: {
+    count: 0,
+    unit: 'day',
+    lastActivityAt: null,
+  },
+  comebackMode: {
+    active: false,
+    daysSinceLastMatch: 0,
+    bonusApplied: false,
+  },
+  objective: {
+    type: 'maintain',
+    target: 1,
+    current: 0,
+    deadline: null,
+  },
+  rivalries: [],
+};
+
 export class MemoryStore {
   constructor() {
     this.users = new Map();
@@ -88,6 +126,7 @@ export class MemoryStore {
         matchFormat: 'marathon',
         autoSideSwitch: true,
         playerRhythm: 'regular',
+        pinnedBadges: [],
       },
       privacy: {
         publicProfile: true,
@@ -112,6 +151,7 @@ export class MemoryStore {
         enabled: false,
       },
       pushTokens: [],
+      playerProfile: { ...DEFAULT_PLAYER_PROFILE },
     };
 
     this.users.set(id, user);
@@ -135,8 +175,32 @@ export class MemoryStore {
     }
 
     Object.assign(user, patch);
+    if (user.settings && !Array.isArray(user.settings.pinnedBadges)) {
+      user.settings.pinnedBadges = [];
+    }
+    if (!user.playerProfile || typeof user.playerProfile !== 'object') {
+      user.playerProfile = { ...DEFAULT_PLAYER_PROFILE };
+    }
+    user.playerProfile.rivalries = Array.isArray(user.playerProfile.rivalries) ? user.playerProfile.rivalries : [];
     this.users.set(id, user);
     return user;
+  }
+
+  updatePlayerProfile(userId, profileData = {}) {
+    const current = this.getUserById(userId);
+    if (!current) {
+      return null;
+    }
+
+    return this.updateUser(userId, {
+      playerProfile: {
+        ...(current.playerProfile ?? DEFAULT_PLAYER_PROFILE),
+        ...(profileData ?? {}),
+        rivalries: Array.isArray(profileData?.rivalries)
+          ? profileData.rivalries
+          : (current.playerProfile?.rivalries ?? []),
+      },
+    });
   }
 
   createSession(userId, token, ttlMs) {
@@ -376,21 +440,44 @@ export class MemoryStore {
     const current = this.badges.get(userId) ?? [];
     const existing = current.find((item) => item.badgeKey === badgeKey);
     if (existing) {
-      return { ...existing, created: false };
+      const tier = higherBadgeTier(existing.tier ?? 'gold', meta?.tier ?? existing.tier ?? 'gold');
+      const merged = {
+        ...existing,
+        tier,
+        meta: { ...(existing.meta ?? {}), ...(meta ?? {}), tier },
+      };
+      this.badges.set(userId, [merged, ...current.filter((item) => item.badgeKey !== badgeKey)]);
+      return { ...merged, created: false };
     }
+    const tier = normalizeBadgeTier(meta?.tier, 'gold');
     const next = {
       id: newId('bdg'),
       userId,
       badgeKey,
+      tier,
       unlockedAt: nowIso(),
-      meta,
+      meta: { ...(meta ?? {}), tier },
     };
     this.badges.set(userId, [next, ...current]);
     return { ...next, created: true };
   }
 
+  updateBadgeTier(userId, badgeKey, newTier, meta = {}) {
+    return this.unlockBadge(userId, badgeKey, {
+      ...(meta ?? {}),
+      tier: normalizeBadgeTier(newTier, 'gold'),
+    });
+  }
+
   listBadgesForUser(userId) {
-    return this.badges.get(userId) ?? [];
+    return (this.badges.get(userId) ?? []).map((entry) => ({
+      ...entry,
+      tier: normalizeBadgeTier(entry.tier, 'gold'),
+      meta: {
+        ...(entry.meta ?? {}),
+        tier: normalizeBadgeTier(entry.tier, 'gold'),
+      },
+    }));
   }
 
   getSeasonState() {

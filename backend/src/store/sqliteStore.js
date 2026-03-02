@@ -53,6 +53,7 @@ const DEFAULT_SETTINGS = {
   matchFormat: 'marathon',
   autoSideSwitch: true,
   playerRhythm: 'regular',
+  pinnedBadges: [],
 };
 
 const DEFAULT_PRIVACY = {
@@ -60,6 +61,44 @@ const DEFAULT_PRIVACY = {
   showGuestMatches: false,
   showHealthStats: true,
 };
+
+const DEFAULT_PLAYER_PROFILE = {
+  type: 'chill',
+  typeOverride: null,
+  personality: null,
+  lastEvaluatedAt: null,
+  formScore: 0,
+  activityStreak: {
+    count: 0,
+    unit: 'day',
+    lastActivityAt: null,
+  },
+  comebackMode: {
+    active: false,
+    daysSinceLastMatch: 0,
+    bonusApplied: false,
+  },
+  objective: {
+    type: 'maintain',
+    target: 1,
+    current: 0,
+    deadline: null,
+  },
+  rivalries: [],
+};
+
+const BADGE_TIER_ORDER = ['bronze', 'silver', 'gold', 'mythic'];
+
+function normalizeBadgeTier(value, fallback = 'gold') {
+  const raw = String(value ?? '').toLowerCase();
+  return BADGE_TIER_ORDER.includes(raw) ? raw : fallback;
+}
+
+function higherBadgeTier(currentTier, nextTier) {
+  const currentIndex = BADGE_TIER_ORDER.indexOf(normalizeBadgeTier(currentTier, 'bronze'));
+  const nextIndex = BADGE_TIER_ORDER.indexOf(normalizeBadgeTier(nextTier, 'bronze'));
+  return nextIndex > currentIndex ? normalizeBadgeTier(nextTier, 'bronze') : normalizeBadgeTier(currentTier, 'bronze');
+}
 
 function normalizeUser(raw) {
   if (!raw) {
@@ -74,6 +113,9 @@ function normalizeUser(raw) {
     settings: {
       ...DEFAULT_SETTINGS,
       ...(raw.settings && typeof raw.settings === 'object' ? raw.settings : {}),
+      pinnedBadges: Array.isArray(raw?.settings?.pinnedBadges)
+        ? raw.settings.pinnedBadges.slice(0, 3).map((item) => String(item)).filter(Boolean)
+        : [],
     },
     privacy: {
       ...DEFAULT_PRIVACY,
@@ -99,6 +141,11 @@ function normalizeUser(raw) {
     history: Array.isArray(raw.history) ? raw.history : [],
     watch: raw.watch ?? { enabled: false },
     pushTokens: Array.isArray(raw.pushTokens) ? raw.pushTokens : [],
+    playerProfile: {
+      ...DEFAULT_PLAYER_PROFILE,
+      ...(raw.playerProfile && typeof raw.playerProfile === 'object' ? raw.playerProfile : {}),
+      rivalries: Array.isArray(raw?.playerProfile?.rivalries) ? raw.playerProfile.rivalries : [],
+    },
   };
 
   if (!user.arcadeTag) {
@@ -196,6 +243,7 @@ export class SQLiteStore {
         id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL,
         badge_key TEXT NOT NULL,
+        tier TEXT NOT NULL DEFAULT 'gold',
         unlocked_at TEXT NOT NULL,
         meta_json TEXT,
         UNIQUE(user_id, badge_key)
@@ -264,6 +312,12 @@ export class SQLiteStore {
 
       CREATE INDEX IF NOT EXISTS idx_marketplace_city_category ON marketplace(status, city_lower, category);
     `);
+
+    const badgeColumns = this.db.prepare('PRAGMA table_info(badges)').all();
+    const hasTier = badgeColumns.some((column) => String(column?.name) === 'tier');
+    if (!hasTier) {
+      this.db.exec(`ALTER TABLE badges ADD COLUMN tier TEXT NOT NULL DEFAULT 'gold';`);
+    }
   }
 
   seedClubsCatalog() {
@@ -394,6 +448,22 @@ export class SQLiteStore {
     );
 
     return updated;
+  }
+
+  updatePlayerProfile(userId, profileData = {}) {
+    const current = this.getUserById(userId);
+    if (!current) {
+      return null;
+    }
+    return this.updateUser(userId, {
+      playerProfile: {
+        ...(current.playerProfile ?? DEFAULT_PLAYER_PROFILE),
+        ...(profileData ?? {}),
+        rivalries: Array.isArray(profileData?.rivalries)
+          ? profileData.rivalries
+          : (current.playerProfile?.rivalries ?? []),
+      },
+    });
   }
 
   listUsers() {
@@ -739,17 +809,27 @@ export class SQLiteStore {
   }
 
   unlockBadge(userId, badgeKey, meta = {}) {
+    const tier = normalizeBadgeTier(meta?.tier, 'gold');
     const current = this.db
-      .prepare('SELECT id, user_id AS userId, badge_key AS badgeKey, unlocked_at AS unlockedAt, meta_json FROM badges WHERE user_id = ? AND badge_key = ? LIMIT 1')
+      .prepare('SELECT id, user_id AS userId, badge_key AS badgeKey, tier, unlocked_at AS unlockedAt, meta_json FROM badges WHERE user_id = ? AND badge_key = ? LIMIT 1')
       .get(userId, badgeKey);
 
     if (current) {
+      const currentMeta = parseJson(current.meta_json, {});
+      const mergedMeta = { ...(currentMeta ?? {}), ...(meta ?? {}), tier };
+      const nextTier = higherBadgeTier(current.tier, tier);
+      this.db.prepare(`
+        UPDATE badges
+        SET tier = ?, meta_json = ?
+        WHERE id = ?
+      `).run(nextTier, JSON.stringify(mergedMeta), current.id);
       return {
         id: current.id,
         userId: current.userId,
         badgeKey: current.badgeKey,
+        tier: nextTier,
         unlockedAt: current.unlockedAt,
-        meta: parseJson(current.meta_json, {}),
+        meta: mergedMeta,
         created: false,
       };
     }
@@ -757,23 +837,58 @@ export class SQLiteStore {
     const id = newId('bdg');
     const unlockedAt = nowIso();
     this.db.prepare(`
-      INSERT INTO badges (id, user_id, badge_key, unlocked_at, meta_json)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(id, userId, badgeKey, unlockedAt, JSON.stringify(meta ?? {}));
+      INSERT INTO badges (id, user_id, badge_key, tier, unlocked_at, meta_json)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(id, userId, badgeKey, tier, unlockedAt, JSON.stringify({ ...(meta ?? {}), tier }));
 
     return {
       id,
       userId,
       badgeKey,
+      tier,
       unlockedAt,
-      meta,
+      meta: { ...(meta ?? {}), tier },
       created: true,
+    };
+  }
+
+  updateBadgeTier(userId, badgeKey, newTier, meta = {}) {
+    const row = this.db
+      .prepare('SELECT id, user_id AS userId, badge_key AS badgeKey, tier, unlocked_at AS unlockedAt, meta_json FROM badges WHERE user_id = ? AND badge_key = ? LIMIT 1')
+      .get(userId, badgeKey);
+    if (!row) {
+      return this.unlockBadge(userId, badgeKey, {
+        ...(meta ?? {}),
+        tier: normalizeBadgeTier(newTier, 'gold'),
+      });
+    }
+
+    const tier = higherBadgeTier(row.tier, normalizeBadgeTier(newTier, row.tier));
+    const mergedMeta = {
+      ...(parseJson(row.meta_json, {}) ?? {}),
+      ...(meta ?? {}),
+      tier,
+    };
+    this.db.prepare(`
+      UPDATE badges
+      SET tier = ?, meta_json = ?
+      WHERE id = ?
+    `).run(tier, JSON.stringify(mergedMeta), row.id);
+
+    return {
+      id: row.id,
+      userId: row.userId,
+      badgeKey: row.badgeKey,
+      tier,
+      unlockedAt: row.unlockedAt,
+      meta: mergedMeta,
+      created: false,
     };
   }
 
   listBadgesForUser(userId) {
     const rows = this.db.prepare(`
-      SELECT id, user_id AS userId, badge_key AS badgeKey, unlocked_at AS unlockedAt, meta_json
+      SELECT id, user_id AS userId, badge_key AS badgeKey, tier, unlocked_at AS unlockedAt, meta_json
       FROM badges
       WHERE user_id = ?
       ORDER BY unlocked_at DESC
@@ -783,6 +898,7 @@ export class SQLiteStore {
       id: row.id,
       userId: row.userId,
       badgeKey: row.badgeKey,
+      tier: normalizeBadgeTier(row.tier, 'gold'),
       unlockedAt: row.unlockedAt,
       meta: parseJson(row.meta_json, {}),
     }));

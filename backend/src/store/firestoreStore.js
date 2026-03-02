@@ -19,6 +19,44 @@ function makeArcadeTag(displayName, id) {
   return `${base}#${suffix}`;
 }
 
+const BADGE_TIER_ORDER = ['bronze', 'silver', 'gold', 'mythic'];
+
+function normalizeBadgeTier(value, fallback = 'gold') {
+  const raw = String(value ?? '').toLowerCase();
+  return BADGE_TIER_ORDER.includes(raw) ? raw : fallback;
+}
+
+function higherBadgeTier(currentTier, nextTier) {
+  const currentIndex = BADGE_TIER_ORDER.indexOf(normalizeBadgeTier(currentTier, 'bronze'));
+  const nextIndex = BADGE_TIER_ORDER.indexOf(normalizeBadgeTier(nextTier, 'bronze'));
+  return nextIndex > currentIndex ? normalizeBadgeTier(nextTier, 'bronze') : normalizeBadgeTier(currentTier, 'bronze');
+}
+
+const DEFAULT_PLAYER_PROFILE = {
+  type: 'chill',
+  typeOverride: null,
+  personality: null,
+  lastEvaluatedAt: null,
+  formScore: 0,
+  activityStreak: {
+    count: 0,
+    unit: 'day',
+    lastActivityAt: null,
+  },
+  comebackMode: {
+    active: false,
+    daysSinceLastMatch: 0,
+    bonusApplied: false,
+  },
+  objective: {
+    type: 'maintain',
+    target: 1,
+    current: 0,
+    deadline: null,
+  },
+  rivalries: [],
+};
+
 export class FirestoreStore {
   constructor() {
     this.db = null;
@@ -61,6 +99,7 @@ export class FirestoreStore {
   marketplace() { return this.db.collection('marketplace'); }
   pairRatings() { return this.db.collection('pairRatings'); }
   leaderboards() { return this.db.collection('leaderboards'); }
+  badges() { return this.db.collection('badges'); }
 
   async createUser({ email, passwordHash, provider, displayName, isVerified }) {
     await this.ensureReady();
@@ -95,6 +134,7 @@ export class FirestoreStore {
         matchFormat: 'marathon',
         autoSideSwitch: true,
         playerRhythm: 'regular',
+        pinnedBadges: [],
       },
       privacy: {
         publicProfile: true,
@@ -119,6 +159,7 @@ export class FirestoreStore {
         enabled: false,
       },
       pushTokens: [],
+      playerProfile: { ...DEFAULT_PLAYER_PROFILE },
     };
 
     await this.users().doc(id).set(user);
@@ -150,6 +191,23 @@ export class FirestoreStore {
     await ref.set(patch, { merge: true });
     const fresh = await ref.get();
     return fresh.data();
+  }
+
+  async updatePlayerProfile(userId, profileData = {}) {
+    await this.ensureReady();
+    const user = await this.getUserById(userId);
+    if (!user) {
+      return null;
+    }
+    return this.updateUser(userId, {
+      playerProfile: {
+        ...(user.playerProfile ?? DEFAULT_PLAYER_PROFILE),
+        ...(profileData ?? {}),
+        rivalries: Array.isArray(profileData?.rivalries)
+          ? profileData.rivalries
+          : (user.playerProfile?.rivalries ?? []),
+      },
+    });
   }
 
   async createSession(userId, token, ttlMs) {
@@ -344,6 +402,72 @@ export class FirestoreStore {
     await this.ensureReady();
     const snap = await this.users().get();
     return snap.docs.map((d) => d.data());
+  }
+
+  async unlockBadge(userId, badgeKey, meta = {}) {
+    await this.ensureReady();
+    const id = `${userId}:${badgeKey}`;
+    const ref = this.badges().doc(id);
+    const doc = await ref.get();
+    const tier = normalizeBadgeTier(meta?.tier, 'gold');
+    if (doc.exists) {
+      const row = doc.data();
+      const nextTier = higherBadgeTier(row.tier, tier);
+      const mergedMeta = {
+        ...(row.meta ?? {}),
+        ...(meta ?? {}),
+        tier: nextTier,
+      };
+      await ref.set({
+        ...row,
+        tier: nextTier,
+        meta: mergedMeta,
+      }, { merge: true });
+      return {
+        ...row,
+        tier: nextTier,
+        meta: mergedMeta,
+        created: false,
+      };
+    }
+
+    const created = {
+      id,
+      userId,
+      badgeKey,
+      tier,
+      unlockedAt: nowIso(),
+      meta: { ...(meta ?? {}), tier },
+    };
+    await ref.set(created);
+    return {
+      ...created,
+      created: true,
+    };
+  }
+
+  async updateBadgeTier(userId, badgeKey, newTier, meta = {}) {
+    return this.unlockBadge(userId, badgeKey, {
+      ...(meta ?? {}),
+      tier: normalizeBadgeTier(newTier, 'gold'),
+    });
+  }
+
+  async listBadgesForUser(userId) {
+    await this.ensureReady();
+    const snap = await this.badges().where('userId', '==', userId).orderBy('unlockedAt', 'desc').get();
+    return snap.docs.map((doc) => {
+      const row = doc.data();
+      const tier = normalizeBadgeTier(row.tier, 'gold');
+      return {
+        ...row,
+        tier,
+        meta: {
+          ...(row.meta ?? {}),
+          tier,
+        },
+      };
+    });
   }
 
   async setLeaderboard(city, rows) {

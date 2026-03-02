@@ -11,6 +11,16 @@ function normalizePlayerRhythm(value, fallback = 'regular') {
   return fallback;
 }
 
+function normalizePinnedBadges(input) {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+  return [...new Set(input
+    .map((item) => String(item ?? '').trim())
+    .filter(Boolean))]
+    .slice(0, 3);
+}
+
 function ratingFromLevel(level) {
   if (level <= 2) return 800;
   if (level <= 4) return 1200;
@@ -70,6 +80,9 @@ export async function updateUserSettings(userId, payload) {
       incomingSettings.playerRhythm ?? user.settings?.playerRhythm ?? 'regular',
       user.settings?.playerRhythm ?? 'regular',
     ),
+    pinnedBadges: incomingSettings.pinnedBadges !== undefined
+      ? normalizePinnedBadges(incomingSettings.pinnedBadges)
+      : normalizePinnedBadges(user.settings?.pinnedBadges ?? []),
   };
   const privacy = {
     ...user.privacy,
@@ -175,5 +188,29 @@ export async function updatePushToken(userId, payload) {
   return {
     ok: true,
     ...result,
+  };
+}
+
+export async function updatePinnedBadges(userId, payload = {}) {
+  const user = await store.getUserById(userId);
+  if (!user) {
+    throw new Error('User not found');
+  }
+
+  const pinnedBadges = normalizePinnedBadges(payload.pinnedBadges);
+  const updated = await store.updateUser(userId, {
+    settings: {
+      ...(user.settings ?? {}),
+      pinnedBadges,
+    },
+  });
+
+  const { passwordHash, ...safe } = updated;
+  return {
+    ...safe,
+    settings: {
+      ...(safe.settings ?? {}),
+      pinnedBadges,
+    },
   };
 }

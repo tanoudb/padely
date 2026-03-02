@@ -97,6 +97,29 @@ export async function configureEngagementNotifications(settings = {}) {
     });
   }
 
+  const contextual = settings.contextual ?? {};
+  if (contextual.preferredDayLabel) {
+    candidates.push({
+      title: txt.contextDayTitle,
+      body: txt.contextDayBody.replace('{day}', String(contextual.preferredDayLabel)),
+      data: { type: 'context_day' },
+    });
+  }
+  if (contextual.nearBestStreak) {
+    candidates.push({
+      title: txt.contextStreakTitle,
+      body: txt.contextStreakBody,
+      data: { type: 'context_streak' },
+    });
+  }
+  if (Number(contextual.pausePatternDays) > 0) {
+    candidates.push({
+      title: txt.contextRestTitle,
+      body: txt.contextRestBody.replace('{days}', String(contextual.pausePatternDays)),
+      data: { type: 'context_pause_pattern' },
+    });
+  }
+
   const scheduledCandidates = candidates.slice(0, Math.min(cap, slots.length));
   for (let index = 0; index < scheduledCandidates.length; index += 1) {
     const slot = slots[index];

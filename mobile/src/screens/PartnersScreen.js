@@ -3,10 +3,13 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { api } from '../api/client';
 import { Card } from '../components/Card';
 import { useSession } from '../state/session';
+import { useUi } from '../state/ui';
 import { theme } from '../theme';
 
 export function PartnersScreen() {
   const { token, user } = useSession();
+  const { palette } = useUi();
+  const styles = useMemo(() => createStyles(palette), [palette]);
   const [duos, setDuos] = useState([]);
   const [players, setPlayers] = useState([]);
 
@@ -15,7 +18,7 @@ export function PartnersScreen() {
       api.duoStats(token, user.id),
       api.listPlayers(token),
     ]).then(([duoData, playerData]) => {
-      setDuos(duoData);
+      setDuos(Array.isArray(duoData?.rows) ? duoData.rows : []);
       setPlayers(playerData);
     }).catch(() => {});
   }, [token, user.id]);
@@ -84,67 +87,69 @@ export function PartnersScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: 'transparent' },
-  content: { padding: 16, gap: 12, paddingBottom: 24 },
-  header: { marginBottom: 4 },
-  eyebrow: {
-    color: theme.colors.accent2,
-    fontFamily: theme.fonts.mono,
-    letterSpacing: 1,
-    fontSize: 11,
-  },
-  h1: {
-    color: theme.colors.text,
-    fontSize: 40,
-    lineHeight: 42,
-    fontFamily: theme.fonts.display,
-  },
-  cardTitle: {
-    color: theme.colors.text,
-    fontFamily: theme.fonts.title,
-    marginBottom: 10,
-    fontSize: 16,
-  },
-  bestName: {
-    color: theme.colors.accent,
-    fontFamily: theme.fonts.display,
-    fontSize: 36,
-    lineHeight: 38,
-  },
-  bestMeta: {
-    color: theme.colors.muted,
-    fontFamily: theme.fonts.body,
-    marginTop: 4,
-  },
-  empty: {
-    color: theme.colors.muted,
-    fontFamily: theme.fonts.body,
-  },
-  row: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(157, 185, 203, 0.15)',
-    paddingVertical: 10,
-  },
-  partnerName: {
-    color: theme.colors.text,
-    fontFamily: theme.fonts.title,
-    fontSize: 15,
-  },
-  meta: {
-    color: theme.colors.muted,
-    fontFamily: theme.fonts.body,
-    fontSize: 12,
-  },
-  right: {
-    alignItems: 'flex-end',
-  },
-  winRate: {
-    color: theme.colors.accent2,
-    fontFamily: theme.fonts.title,
-    fontSize: 20,
-  },
-});
+function createStyles(palette) {
+  return StyleSheet.create({
+    root: { flex: 1, backgroundColor: 'transparent' },
+    content: { padding: 16, gap: 12, paddingBottom: 24 },
+    header: { marginBottom: 4 },
+    eyebrow: {
+      color: palette.accent2,
+      fontFamily: theme.fonts.mono,
+      letterSpacing: 1,
+      fontSize: 11,
+    },
+    h1: {
+      color: palette.text,
+      fontSize: 40,
+      lineHeight: 42,
+      fontFamily: theme.fonts.display,
+    },
+    cardTitle: {
+      color: palette.text,
+      fontFamily: theme.fonts.title,
+      marginBottom: 10,
+      fontSize: 16,
+    },
+    bestName: {
+      color: palette.accent,
+      fontFamily: theme.fonts.display,
+      fontSize: 36,
+      lineHeight: 38,
+    },
+    bestMeta: {
+      color: palette.muted,
+      fontFamily: theme.fonts.body,
+      marginTop: 4,
+    },
+    empty: {
+      color: palette.muted,
+      fontFamily: theme.fonts.body,
+    },
+    row: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      borderBottomWidth: 1,
+      borderBottomColor: 'rgba(157, 185, 203, 0.15)',
+      paddingVertical: 10,
+    },
+    partnerName: {
+      color: palette.text,
+      fontFamily: theme.fonts.title,
+      fontSize: 15,
+    },
+    meta: {
+      color: palette.muted,
+      fontFamily: theme.fonts.body,
+      fontSize: 12,
+    },
+    right: {
+      alignItems: 'flex-end',
+    },
+    winRate: {
+      color: palette.accent2,
+      fontFamily: theme.fonts.title,
+      fontSize: 20,
+    },
+  });
+}

@@ -384,7 +384,7 @@ export default function App() {
 const styles = StyleSheet.create({
   fontFallback: {
     flex: 1,
-    backgroundColor: theme.colors.bg,
+    backgroundColor: '#F3F4F6',
   },
   splash: {
     flex: 1,
