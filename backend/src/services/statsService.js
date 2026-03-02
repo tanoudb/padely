@@ -1,4 +1,5 @@
 import { store } from '../store/index.js';
+import { evaluateBadges } from './gamificationService.js';
 
 const VALID_PERIODS = new Set(['week', 'month', 'season', 'all']);
 const HEATMAP_DAYS = 84;
@@ -50,6 +51,34 @@ function participantsForMatch(match, teamKey) {
     kind: 'user',
     userId: id,
   }));
+}
+
+function participantDisplayName(slot, usersById) {
+  if (!slot) return 'Invite';
+  if (slot.kind === 'user' && slot.userId) {
+    return usersById.get(slot.userId)?.displayName ?? 'Joueur';
+  }
+  if (slot.kind === 'guest') {
+    return slot.guestName ?? 'Invite';
+  }
+  return 'Invite';
+}
+
+async function usersMapFromMatches(matches = []) {
+  const ids = new Set();
+  for (const match of matches) {
+    for (const id of (match.players ?? [])) {
+      ids.add(String(id));
+    }
+  }
+  const map = new Map();
+  const list = await Promise.all([...ids].map((id) => store.getUserById(id)));
+  list.forEach((user) => {
+    if (user?.id) {
+      map.set(user.id, user);
+    }
+  });
+  return map;
 }
 
 function normalizePeriod(raw) {
@@ -470,6 +499,84 @@ export async function getRecords(userId, options = {}) {
       at: match.validatedAt ?? match.createdAt,
     })),
     playerSnapshot: participant,
+  };
+}
+
+function sanitizeRecentMatchesVisibility(user, matches) {
+  const showGuestMatches = Boolean(user?.privacy?.showGuestMatches ?? false);
+  if (showGuestMatches) {
+    return matches;
+  }
+  return matches.filter((match) => {
+    const teamA = participantsForMatch(match, 'teamA');
+    const teamB = participantsForMatch(match, 'teamB');
+    return [...teamA, ...teamB].every((slot) => slot.kind === 'user');
+  });
+}
+
+function matchSummaryForViewer(match, playerId, usersById) {
+  const isTeamA = (match.teamA ?? []).includes(playerId);
+  const myTeamKey = isTeamA ? 'teamA' : 'teamB';
+  const oppTeamKey = isTeamA ? 'teamB' : 'teamA';
+  const myTeam = participantsForMatch(match, myTeamKey);
+  const oppTeam = participantsForMatch(match, oppTeamKey);
+  const partner = myTeam.find((slot) => slot.kind === 'user' && slot.userId !== playerId) ?? myTeam.find((slot) => slot.kind === 'guest');
+
+  const outcome = didUserWin(match, playerId) ? 'win' : 'loss';
+  return {
+    matchId: match.id,
+    mode: match.mode ?? 'ranked',
+    outcome,
+    createdAt: match.createdAt,
+    validatedAt: match.validatedAt ?? null,
+    score: (match.sets ?? []).map((set) => `${set.a}-${set.b}`).join(' / '),
+    partner: participantDisplayName(partner, usersById),
+    opponents: oppTeam.map((slot) => participantDisplayName(slot, usersById)),
+  };
+}
+
+export async function getPublicPlayerProfile(playerId, options = {}) {
+  const viewerId = options.viewerId ?? playerId;
+  const period = normalizePeriod(options.period);
+  const user = await maybeSafeUser(playerId, viewerId);
+
+  const baseMatches = await matchesForUser(playerId);
+  const visibilityMatches = sanitizeRecentMatchesVisibility(user, baseMatches);
+  const usersById = await usersMapFromMatches(visibilityMatches);
+  const recentMatches = filterMatchesByPeriod(visibilityMatches, period)
+    .sort((a, b) => matchTimeMs(b) - matchTimeMs(a))
+    .slice(0, 12)
+    .map((match) => matchSummaryForViewer(match, playerId, usersById));
+
+  const [dashboard, records, badges] = await Promise.all([
+    getDashboard(playerId, { viewerId, period }),
+    getRecords(playerId, { viewerId, period }),
+    evaluateBadges(playerId),
+  ]);
+
+  const headToHead = viewerId && viewerId !== playerId
+    ? await getHeadToHead(viewerId, playerId, { viewerId, period })
+    : null;
+
+  return {
+    profile: records.profile,
+    period,
+    seasonLabel: records.seasonLabel,
+    stats: {
+      matches: dashboard.matches,
+      wins: dashboard.wins,
+      losses: dashboard.losses,
+      winRate: dashboard.matches ? Number(((dashboard.wins / dashboard.matches) * 100).toFixed(1)) : 0,
+      playTimeMinutes: dashboard.playTimeMinutes,
+      consistencyScore: dashboard.consistencyScore,
+      regularityScore: dashboard.regularityScore,
+      averageDistanceKm: dashboard.averageDistanceKm,
+    },
+    records: records.records,
+    activityHeatmap: records.activityHeatmap,
+    badges: badges.badges ?? [],
+    headToHead,
+    recentMatches,
   };
 }
 

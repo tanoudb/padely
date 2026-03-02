@@ -74,6 +74,7 @@ import {
   getHeadToHead,
   getDuoStats,
   getPerformanceHoles,
+  getPublicPlayerProfile,
   getRecords,
 } from './services/statsService.js';
 import { seedDemoData } from './store/seed.js';
@@ -406,6 +407,17 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'GET' && params) {
         const me = await requireAuth(req);
         return json(res, 200, await getRecords(params.userId, {
+          period: url.searchParams.get('period') ?? 'all',
+          viewerId: me.id,
+        }));
+      }
+    }
+
+    {
+      const params = pathMatch(url.pathname, '/api/v1/stats/public-profile/:playerId');
+      if (req.method === 'GET' && params) {
+        const me = await requireAuth(req);
+        return json(res, 200, await getPublicPlayerProfile(params.playerId, {
           period: url.searchParams.get('period') ?? 'all',
           viewerId: me.id,
         }));

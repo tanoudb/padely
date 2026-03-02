@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useRoute } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { api } from '../api/client';
 import { Card } from '../components/Card';
 import { useSession } from '../state/session';
@@ -31,9 +31,7 @@ function Heatmap({ items, palette }) {
   }, [items]);
 
   function colorForLevel(level) {
-    if (!level) {
-      return palette.accentMuted;
-    }
+    if (!level) return palette.accentMuted;
     if (level === 1) return palette.accentMuted;
     if (level === 2) return palette.accent;
     if (level === 3) return palette.accent2;
@@ -62,6 +60,15 @@ function Heatmap({ items, palette }) {
   );
 }
 
+function StatTile({ label, value, palette }) {
+  return (
+    <View style={[styles.statTile, { backgroundColor: palette.card, borderColor: palette.line }]}>
+      <Text style={[styles.statValue, { color: palette.text }]}>{value}</Text>
+      <Text style={[styles.statLabel, { color: palette.textSecondary }]}>{label}</Text>
+    </View>
+  );
+}
+
 function ScoreLine({ label, value, palette }) {
   return (
     <View style={[styles.line, { borderBottomColor: palette.line }]}>
@@ -71,7 +78,12 @@ function ScoreLine({ label, value, palette }) {
   );
 }
 
+function badgeLabel(name) {
+  return String(name ?? '').toUpperCase();
+}
+
 export function PlayerProfileScreen() {
+  const navigation = useNavigation();
   const route = useRoute();
   const { token, user } = useSession();
   const { palette } = useUi();
@@ -81,10 +93,7 @@ export function PlayerProfileScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
-
-  const [dashboard, setDashboard] = useState(null);
-  const [head, setHead] = useState(null);
-  const [records, setRecords] = useState(null);
+  const [profileData, setProfileData] = useState(null);
 
   async function load() {
     if (!playerId) {
@@ -94,14 +103,8 @@ export function PlayerProfileScreen() {
     }
 
     setError('');
-    const [dashOut, headOut, recordsOut] = await Promise.all([
-      api.dashboard(token, playerId, period),
-      api.headToHead(token, user.id, playerId, period),
-      api.records(token, playerId, period),
-    ]);
-    setDashboard(dashOut);
-    setHead(headOut);
-    setRecords(recordsOut);
+    const out = await api.publicProfile(token, playerId, period);
+    setProfileData(out);
   }
 
   useEffect(() => {
@@ -120,7 +123,7 @@ export function PlayerProfileScreen() {
     return () => {
       active = false;
     };
-  }, [token, user.id, playerId, period]);
+  }, [token, playerId, period]);
 
   async function onRefresh() {
     setRefreshing(true);
@@ -131,6 +134,13 @@ export function PlayerProfileScreen() {
     } finally {
       setRefreshing(false);
     }
+  }
+
+  function proposeMatch() {
+    navigation.getParent()?.navigate('PlayTab', {
+      screen: 'PlaySetup',
+      params: { suggestedPlayerId: playerId },
+    });
   }
 
   if (loading) {
@@ -152,7 +162,12 @@ export function PlayerProfileScreen() {
     );
   }
 
-  const profile = records?.profile ?? {};
+  const profile = profileData?.profile ?? {};
+  const stats = profileData?.stats ?? {};
+  const records = profileData?.records ?? {};
+  const head = profileData?.headToHead;
+  const recentMatches = profileData?.recentMatches ?? [];
+  const badges = profileData?.badges ?? [];
 
   return (
     <ScrollView
@@ -163,7 +178,12 @@ export function PlayerProfileScreen() {
       <View style={styles.header}>
         <Text style={[styles.kicker, { color: palette.accent }]}>PROFIL JOUEUR</Text>
         <Text style={[styles.h1, { color: palette.text }]}>{profile.displayName ?? route.params?.playerName ?? 'Joueur'}</Text>
-        <Text style={[styles.sub, { color: palette.textSecondary }]}>PIR {Math.round(profile.pir ?? dashboard?.pir ?? 0)} · Classement {Math.round(profile.rating ?? dashboard?.rating ?? 0)}</Text>
+        <Text style={[styles.sub, { color: palette.textSecondary }]}>PIR {Math.round(profile.pir ?? 0)} · Classement {Math.round(profile.rating ?? 0)} · {profile.city ?? 'France'}</Text>
+        {playerId !== user.id ? (
+          <Pressable style={[styles.cta, { backgroundColor: palette.accent }]} onPress={proposeMatch}>
+            <Text style={[styles.ctaText, { color: palette.accentText ?? '#09090B' }]}>PROPOSER UN MATCH</Text>
+          </Pressable>
+        ) : null}
       </View>
 
       <View style={styles.periodRow}>
@@ -187,25 +207,64 @@ export function PlayerProfileScreen() {
         })}
       </View>
 
-      <Card elevated>
-        <Text style={[styles.cardTitle, { color: palette.text }]}>Face-a-face</Text>
-        <ScoreLine label="Confrontations" value={head?.totalMatches ?? 0} palette={palette} />
-        <ScoreLine label="Victoires vs toi" value={head?.losses ?? 0} palette={palette} />
-        <ScoreLine label="Defaites vs toi" value={head?.wins ?? 0} palette={palette} />
-        <ScoreLine label="Ton winrate" value={`${head?.winRate ?? 0}%`} palette={palette} />
+      <View style={styles.statsGrid}>
+        <StatTile label="Matchs" value={stats.matches ?? 0} palette={palette} />
+        <StatTile label="Winrate" value={`${stats.winRate ?? 0}%`} palette={palette} />
+        <StatTile label="Regularite" value={stats.regularityScore ?? 0} palette={palette} />
+        <StatTile label="Constance" value={stats.consistencyScore ?? 0} palette={palette} />
+      </View>
+
+      {head ? (
+        <Card elevated>
+          <Text style={[styles.cardTitle, { color: palette.text }]}>Face-a-face</Text>
+          <ScoreLine label="Confrontations" value={head.totalMatches ?? 0} palette={palette} />
+          <ScoreLine label="Victoires vs toi" value={head.losses ?? 0} palette={palette} />
+          <ScoreLine label="Defaites vs toi" value={head.wins ?? 0} palette={palette} />
+          <ScoreLine label="Ton winrate" value={`${head.winRate ?? 0}%`} palette={palette} />
+        </Card>
+      ) : null}
+
+      <Card>
+        <Text style={[styles.cardTitle, { color: palette.text }]}>Badges</Text>
+        <View style={styles.badgesWrap}>
+          {badges.map((badge) => (
+            <View key={badge} style={[styles.badge, { backgroundColor: palette.accentMuted, borderColor: palette.accent }]}>
+              <Text style={[styles.badgeText, { color: palette.accent }]} numberOfLines={2}>{badgeLabel(badge)}</Text>
+            </View>
+          ))}
+          {badges.length === 0 ? <Text style={[styles.emptyText, { color: palette.textSecondary }]}>Aucun badge debloque pour le moment.</Text> : null}
+        </View>
       </Card>
 
       <Card>
         <Text style={[styles.cardTitle, { color: palette.text }]}>Records</Text>
-        <ScoreLine label="Plus gros upset" value={`${records?.records?.biggestUpset?.ratingGap ?? 0} pts`} palette={palette} />
-        <ScoreLine label="Meilleure serie" value={`${records?.records?.bestWinStreak ?? 0} victoires`} palette={palette} />
-        <ScoreLine label="Meilleur set" value={records?.records?.bestSet?.score ?? 'N/A'} palette={palette} />
-        <ScoreLine label="Match le plus long" value={`${records?.records?.longestMatch?.minutes ?? 0} min`} palette={palette} />
+        <ScoreLine label="Plus gros upset" value={`${records?.biggestUpset?.ratingGap ?? 0} pts`} palette={palette} />
+        <ScoreLine label="Meilleure serie" value={`${records?.bestWinStreak ?? 0} victoires`} palette={palette} />
+        <ScoreLine label="Meilleur set" value={records?.bestSet?.score ?? 'N/A'} palette={palette} />
+        <ScoreLine label="Match le plus long" value={`${records?.longestMatch?.minutes ?? 0} min`} palette={palette} />
+      </Card>
+
+      <Card>
+        <Text style={[styles.cardTitle, { color: palette.text }]}>Historique recent</Text>
+        <View style={styles.matchesWrap}>
+          {recentMatches.map((item) => (
+            <View key={item.matchId} style={[styles.matchRow, { borderColor: palette.line, backgroundColor: palette.bgAlt }]}>
+              <View style={styles.matchTopRow}>
+                <Text style={[styles.matchOutcome, { color: item.outcome === 'win' ? palette.accent2 : palette.danger }]}>{item.outcome === 'win' ? 'VICTOIRE' : 'DEFAITE'}</Text>
+                <Text style={[styles.matchMeta, { color: palette.textSecondary }]}>{item.mode === 'friendly' ? 'Amical' : 'Classe'}</Text>
+              </View>
+              <Text style={[styles.matchScore, { color: palette.text }]}>{item.score || 'N/A'}</Text>
+              <Text style={[styles.matchMeta, { color: palette.textSecondary }]}>Partenaire: {item.partner}</Text>
+              <Text style={[styles.matchMeta, { color: palette.textSecondary }]}>Adversaires: {(item.opponents ?? []).join(' / ')}</Text>
+            </View>
+          ))}
+          {recentMatches.length === 0 ? <Text style={[styles.emptyText, { color: palette.textSecondary }]}>Pas encore de matchs sur cette periode.</Text> : null}
+        </View>
       </Card>
 
       <Card>
         <Text style={[styles.cardTitle, { color: palette.text }]}>Activite recente</Text>
-        <Heatmap items={records?.activityHeatmap ?? dashboard?.activityHeatmap ?? []} palette={palette} />
+        <Heatmap items={profileData?.activityHeatmap ?? []} palette={palette} />
       </Card>
     </ScrollView>
   );
@@ -215,10 +274,22 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   content: { padding: 16, gap: 12, paddingBottom: 30 },
-  header: { gap: 3 },
+  header: { gap: 4 },
   kicker: { fontFamily: theme.fonts.title, fontSize: 11, letterSpacing: 1.1 },
   h1: { fontFamily: theme.fonts.display, fontSize: 32, lineHeight: 36 },
   sub: { fontFamily: theme.fonts.body, fontSize: 13 },
+  cta: {
+    marginTop: 8,
+    minHeight: 46,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  ctaText: {
+    fontFamily: theme.fonts.title,
+    fontSize: 12,
+    letterSpacing: 0.8,
+  },
   periodRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
   periodBtn: {
     minHeight: 34,
@@ -232,6 +303,21 @@ const styles = StyleSheet.create({
     fontSize: 12,
     textTransform: 'uppercase',
   },
+  statsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  statTile: {
+    width: '48%',
+    minHeight: 78,
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 10,
+    justifyContent: 'space-between',
+  },
+  statValue: { fontFamily: theme.fonts.display, fontSize: 24, lineHeight: 26 },
+  statLabel: { fontFamily: theme.fonts.body, fontSize: 12 },
   cardTitle: { fontFamily: theme.fonts.title, fontSize: 15, marginBottom: 8 },
   line: {
     minHeight: 34,
@@ -242,6 +328,53 @@ const styles = StyleSheet.create({
   },
   label: { fontFamily: theme.fonts.body, fontSize: 13 },
   value: { fontFamily: theme.fonts.title, fontSize: 13 },
+  badgesWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  badge: {
+    minWidth: '31%',
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeText: {
+    fontFamily: theme.fonts.title,
+    fontSize: 10,
+    textAlign: 'center',
+    letterSpacing: 0.3,
+  },
+  matchesWrap: {
+    gap: 8,
+  },
+  matchRow: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 10,
+    gap: 3,
+  },
+  matchTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  matchOutcome: {
+    fontFamily: theme.fonts.title,
+    fontSize: 11,
+    letterSpacing: 0.8,
+  },
+  matchScore: {
+    fontFamily: theme.fonts.title,
+    fontSize: 14,
+  },
+  matchMeta: {
+    fontFamily: theme.fonts.body,
+    fontSize: 12,
+  },
   heatmapWrap: {
     flexDirection: 'row',
     gap: 4,
@@ -256,6 +389,7 @@ const styles = StyleSheet.create({
     borderRadius: 3,
     borderWidth: 1,
   },
+  emptyText: { fontFamily: theme.fonts.body, fontSize: 13 },
   errorTitle: { fontFamily: theme.fonts.title, fontSize: 18, marginBottom: 6 },
   errorText: { fontFamily: theme.fonts.body, fontSize: 14 },
 });

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { registerWithEmail } from '../src/services/authService.js';
 import { createMatch, validateMatch } from '../src/services/matchService.js';
-import { getDashboard, getHeadToHead, getRecords } from '../src/services/statsService.js';
+import { getDashboard, getHeadToHead, getPublicPlayerProfile, getRecords } from '../src/services/statsService.js';
 import { store } from '../src/store/index.js';
 
 async function createValidatedMatch({ teamA, teamB, sets, createdBy }) {
@@ -88,4 +88,54 @@ test('stats access is blocked when profile is private', async () => {
     () => getRecords(privateUser.id, { viewerId: visitor.id, period: 'all' }),
     /private/i,
   );
+
+  await assert.rejects(
+    () => getPublicPlayerProfile(privateUser.id, { viewerId: visitor.id, period: 'all' }),
+    /private/i,
+  );
+});
+
+test('public player profile returns badges and hides guest matches when disabled', async () => {
+  const me = (await registerWithEmail({ email: 'public_me@padely.app', password: 'strongpass7', displayName: 'Public Me' })).user;
+  const mate = (await registerWithEmail({ email: 'public_mate@padely.app', password: 'strongpass8', displayName: 'Public Mate' })).user;
+  const opp1 = (await registerWithEmail({ email: 'public_opp1@padely.app', password: 'strongpass9', displayName: 'Public Opp1' })).user;
+  const opp2 = (await registerWithEmail({ email: 'public_opp2@padely.app', password: 'strongpass10', displayName: 'Public Opp2' })).user;
+
+  await createValidatedMatch({
+    teamA: [me.id, mate.id],
+    teamB: [opp1.id, opp2.id],
+    sets: [{ a: 6, b: 3 }, { a: 6, b: 4 }],
+    createdBy: me.id,
+  });
+
+  await createMatch({
+    teamA: [
+      me.id,
+      {
+        kind: 'guest',
+        guestName: 'Guest Team Mate',
+        guestLevel: 'Intermediaire',
+      },
+    ],
+    teamB: [opp1.id, opp2.id],
+    sets: [{ a: 4, b: 6 }, { a: 6, b: 4 }, { a: 1, b: 0 }],
+    mode: 'friendly',
+    matchFormat: 'club',
+    totalCostEur: 40,
+    clubName: 'Padely Friendly Club',
+  }, me.id);
+
+  await store.updateUser(me.id, {
+    privacy: {
+      ...(me.privacy ?? {}),
+      showGuestMatches: false,
+    },
+  });
+
+  const profile = await getPublicPlayerProfile(me.id, { viewerId: opp1.id, period: 'all' });
+  assert.equal(profile.profile.id, me.id);
+  assert.equal(Array.isArray(profile.badges), true);
+  assert.equal(profile.recentMatches.length, 1);
+  assert.equal(profile.recentMatches[0].mode, 'ranked');
+  assert.equal(profile.recentMatches[0].partner, mate.displayName);
 });

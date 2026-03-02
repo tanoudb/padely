@@ -901,10 +901,10 @@ export function CommunityScreen() {
           <Card>
             <Text style={styles.sectionTitle}>{t('community.localRanking', { city })}</Text>
             {(crew?.leaderboard ?? []).slice(0, 8).map((row) => (
-              <View key={row.userId} style={styles.rankRow}>
+              <Pressable key={row.userId} style={styles.rankRow} onPress={() => openPlayerProfile(row)}>
                 <Text style={styles.rankName}>#{row.rank} {row.displayName}</Text>
                 <Text style={styles.rankScore}>{row.rating}</Text>
-              </View>
+              </Pressable>
             ))}
           </Card>
         </>

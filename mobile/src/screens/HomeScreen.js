@@ -98,6 +98,17 @@ export function HomeScreen() {
     navigation.getParent()?.navigate('CommunityTab', { screen: 'CommunityMain' });
   }
 
+  function openPlayerProfile(player) {
+    if (!player?.userId) return;
+    navigation.getParent()?.navigate('CommunityTab', {
+      screen: 'PlayerProfile',
+      params: {
+        playerId: player.userId,
+        playerName: player.displayName,
+      },
+    });
+  }
+
   const loadHome = useCallback(async () => {
     const [dash, periods, matchesOut] = await Promise.all([
       api.dashboard(token, user.id),
@@ -234,7 +245,7 @@ export function HomeScreen() {
         <Card elevated>
           <Text style={[styles.sectionTitle, { color: palette.text }]}>{t('home.launchTitle')}</Text>
           <View style={styles.quickRow}>
-            <Pressable style={[styles.quickBtnPrimary, { backgroundColor: palette.accent }]} onPress={() => onNavigate?.('play')}>
+            <Pressable style={[styles.quickBtnPrimary, { backgroundColor: palette.accent }]} onPress={goPlaySetup}>
               <Text style={styles.quickBtnPrimaryText}>{t('home.launchRanked')}</Text>
             </Pressable>
             <Pressable style={[styles.quickBtnGhost, { borderColor: palette.line, backgroundColor: palette.chip }]} onPress={goCommunity}>
@@ -247,7 +258,7 @@ export function HomeScreen() {
           <Text style={[styles.sectionTitle, { color: palette.text }]}>{t('home.cityRanking', { city: user.city ?? 'Lyon' })}</Text>
           <View style={styles.boardRows}>
             {topRows.map((row) => (
-              <LeaderboardRow key={row.userId} row={row} podium />
+              <LeaderboardRow key={row.userId} row={row} podium onPress={openPlayerProfile} />
             ))}
             {topRows.length === 0 ? (
               <Text style={[styles.empty, { color: palette.muted }]}>Aucune donnee de classement.</Text>

@@ -33,12 +33,24 @@ export function PlaySetupScreen() {
   const totalCostShake = useSharedValue(0);
 
   const highlightedMatchId = route.params?.matchId ? String(route.params.matchId) : null;
+  const suggestedPlayerId = route.params?.suggestedPlayerId ? String(route.params.suggestedPlayerId) : '';
 
   useEffect(() => {
     api.listPlayers(token)
       .then((out) => setPlayers(out.filter((p) => p.id !== user.id)))
       .catch((e) => setFeedback(e.message));
   }, [token, user.id]);
+
+  useEffect(() => {
+    if (!suggestedPlayerId) return;
+    setSelectedUsers((prev) => {
+      if (prev.includes(suggestedPlayerId)) return prev;
+      if (prev.length + guests.length >= 3) return prev;
+      const exists = players.some((item) => item.id === suggestedPlayerId);
+      if (!exists) return prev;
+      return [suggestedPlayerId, ...prev].slice(0, 3);
+    });
+  }, [suggestedPlayerId, players, guests.length]);
 
   useEffect(() => {
     if (!highlightedMatchId) {

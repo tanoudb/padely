@@ -140,3 +140,17 @@ Mobile: `mobile/src/api/client.js` ajoute les méthodes stats avancées, `mobile
 ✅
 ### Prochaine mission recommandée
 PROFILS PUBLICS (historique complet + badges + bouton proposer un match depuis leaderboard)
+
+## [2026-03-02] — Run #08
+### Mission
+PROFILS PUBLICS
+### Résultat
+Le profil joueur public est maintenant complet: stats période, badges débloqués, historique récent des matchs avec partenaire/adversaires, heatmap d’activité et face-à-face sont visibles depuis un seul écran.
+Depuis les leaderboards (Accueil + Communauté), on peut ouvrir un profil joueur et proposer un match en un tap, avec préremplissage automatique du joueur ciblé dans la configuration de match.
+### Technique
+Backend: nouveau service `getPublicPlayerProfile` dans `backend/src/services/statsService.js` + endpoint `GET /api/v1/stats/public-profile/:playerId` dans `backend/src/server.js`, avec respect de `publicProfile` et filtrage des matchs invités selon `showGuestMatches`. Tests étendus dans `backend/test/statsAdvanced.test.js`.
+Mobile: `mobile/src/screens/PlayerProfileScreen.js` refondu pour consommer `api.publicProfile` (`mobile/src/api/client.js`) et afficher badges + historique + CTA proposer match. `mobile/src/screens/play/PlaySetupScreen.js` supporte `suggestedPlayerId` pour préselection. Navigation profil branchée depuis leaderboard via `mobile/src/components/LeaderboardRow.js`, `mobile/src/screens/HomeScreen.js`, `mobile/src/screens/CommunityScreen.js`.
+### Statut
+✅
+### Prochaine mission recommandée
+PARTAGE SOCIAL (image de résultat premium noir/or + share sheet natif)

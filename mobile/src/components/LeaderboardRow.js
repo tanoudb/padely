@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Avatar } from './Avatar';
 import { RankBadge } from './RankBadge';
 import { useUi } from '../state/ui';
@@ -15,13 +15,15 @@ function rankFromRating(rating) {
   return 'Bronze I';
 }
 
-export function LeaderboardRow({ row, podium = false }) {
+export function LeaderboardRow({ row, podium = false, onPress }) {
   const { palette } = useUi();
   const rating = Math.round(row?.rankingScore ?? row?.rating ?? 0);
   const badge = rankFromRating(rating);
 
   return (
-    <View
+    <Pressable
+      disabled={!onPress}
+      onPress={() => onPress?.(row)}
       style={[
         styles.row,
         {
@@ -39,7 +41,7 @@ export function LeaderboardRow({ row, podium = false }) {
         <RankBadge rank={badge} size="sm" />
       </View>
       <Text style={[styles.score, { color: palette.text }]}>{rating} PIR</Text>
-    </View>
+    </Pressable>
   );
 }
 
