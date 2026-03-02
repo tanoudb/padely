@@ -126,3 +126,17 @@ Mobile: `mobile/src/utils/communityStream.js` (SSE + fallback polling 10s), `mob
 ✅
 ### Prochaine mission recommandée
 STATS AVANCÉES
+
+## [2026-03-02] — Run #07
+### Mission
+STATS AVANCÉES
+### Résultat
+Le profil joueur affiche maintenant des stats avancées filtrables par période (7 jours, 30 jours, saison, global), des records personnels et une heatmap d’activité type GitHub pour rendre la progression vraiment lisible.
+Quand on visite un autre joueur depuis la communauté, un écran dédié affiche le head-to-head complet (bilan, winrate, historique récent) et respecte la confidentialité (profil privé bloqué).
+### Technique
+Backend: `backend/src/services/statsService.js` enrichi avec filtrage période, records (`biggestUpset`, `bestWinStreak`, `bestSet`, `longestMatch`), heatmap, endpoint head-to-head et garde privacy; `backend/src/server.js` expose `GET /api/v1/stats/head-to-head/:userId/:opponentId` et `GET /api/v1/stats/records/:userId` + query `period` sur les endpoints stats existants. `backend/test/statsAdvanced.test.js` couvre période/records/head-to-head/privacy. Correction stabilité temps réel sur pagination messages via timestamps monotones dans `backend/src/services/communityService.js` (fix régression test).
+Mobile: `mobile/src/api/client.js` ajoute les méthodes stats avancées, `mobile/src/screens/ProfileScreen.js` intègre sélecteur de période + records + heatmap, `mobile/src/screens/PlayerProfileScreen.js` nouveau profil visitable avec head-to-head, `mobile/src/App.js` route `PlayerProfile`, `mobile/src/screens/CommunityScreen.js` navigation vers profil joueur, `mobile/src/i18n/dictionaries.js` nouvelles clés FR/EN.
+### Statut
+✅
+### Prochaine mission recommandée
+PROFILS PUBLICS (historique complet + badges + bouton proposer un match depuis leaderboard)

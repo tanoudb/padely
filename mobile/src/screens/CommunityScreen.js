@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { useIsFocused, useRoute } from '@react-navigation/native';
+import { useIsFocused, useNavigation, useRoute } from '@react-navigation/native';
 import * as Location from 'expo-location';
 import { LinearGradient } from 'expo-linear-gradient';
 import { API_URL, api } from '../api/client';
@@ -121,6 +121,7 @@ function clubCodeFromQrValue(raw) {
 }
 
 export function CommunityScreen() {
+  const navigation = useNavigation();
   const route = useRoute();
   const isFocused = useIsFocused();
   const { token, user } = useSession();
@@ -568,6 +569,14 @@ export function CommunityScreen() {
     }
   }
 
+  function openPlayerProfile(player) {
+    if (!player?.id) return;
+    navigation.navigate('PlayerProfile', {
+      playerId: player.id,
+      playerName: player.displayName,
+    });
+  }
+
   return (
     <ScrollView
       style={styles.root}
@@ -678,13 +687,13 @@ export function CommunityScreen() {
               <Text style={styles.sectionTitle}>{t('community.newPartners')}</Text>
               {suggestedPlayers.map((p) => (
                 <View key={p.id} style={styles.suggestRow}>
-                  <View style={styles.suggestLeft}>
+                  <Pressable style={styles.suggestLeft} onPress={() => openPlayerProfile(p)}>
                     <Avatar name={p.displayName} />
                     <View>
                       <Text style={styles.suggestName}>{p.displayName}</Text>
                       <Text style={styles.suggestMeta}>{p.city ?? t('community.unknownCity')} · PIR {Math.round(p.rating)}</Text>
                     </View>
-                  </View>
+                  </Pressable>
                   <Pressable style={styles.addBtn} onPress={() => addFriend(p.id)}>
                     <Text style={styles.addBtnText}>{t('community.add')}</Text>
                   </Pressable>

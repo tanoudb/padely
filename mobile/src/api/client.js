@@ -121,9 +121,16 @@ export const api = {
   markPrivateRead: (token, friendId, readAt) =>
     request(`/api/v1/community/messages/${encodeURIComponent(friendId)}/read`, { method: 'POST', token, body: { readAt } }),
   sendPrivateMessage: (token, friendId, text) => request(`/api/v1/community/messages/${encodeURIComponent(friendId)}`, { method: 'POST', token, body: { text } }),
-  dashboard: (token, userId) => request(`/api/v1/stats/dashboard/${userId}`, { token }),
-  duoStats: (token, userId) => request(`/api/v1/stats/duo/${userId}`, { token }),
-  holes: (token, userId) => request(`/api/v1/stats/performance-holes/${userId}`, { token }),
+  dashboard: (token, userId, period = 'all') =>
+    request(`/api/v1/stats/dashboard/${encodeURIComponent(userId)}${toQuery({ period })}`, { token }),
+  duoStats: (token, userId, period = 'all') =>
+    request(`/api/v1/stats/duo/${encodeURIComponent(userId)}${toQuery({ period })}`, { token }),
+  headToHead: (token, userId, opponentId, period = 'all') =>
+    request(`/api/v1/stats/head-to-head/${encodeURIComponent(userId)}/${encodeURIComponent(opponentId)}${toQuery({ period })}`, { token }),
+  records: (token, userId, period = 'all') =>
+    request(`/api/v1/stats/records/${encodeURIComponent(userId)}${toQuery({ period })}`, { token }),
+  holes: (token, userId, period = 'all') =>
+    request(`/api/v1/stats/performance-holes/${encodeURIComponent(userId)}${toQuery({ period })}`, { token }),
   listings: (token, city) => request(`/api/v1/marketplace/listings?city=${encodeURIComponent(city)}`, { token }),
   createListing: (token, body) => request('/api/v1/marketplace/listings', { method: 'POST', token, body }),
 };

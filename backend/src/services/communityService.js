@@ -23,6 +23,7 @@ const FALLBACK_CLUB_CHANNELS = [
 ];
 
 const communitySubscribers = new Map();
+let lastMessageTs = 0;
 
 function normalize(text) {
   return String(text ?? '').trim();
@@ -88,6 +89,16 @@ function normalizeArcadeTag(tag) {
 
 function stablePairKey(userA, userB) {
   return [String(userA ?? ''), String(userB ?? '')].sort().join(':');
+}
+
+function nextMessageIso() {
+  const now = Date.now();
+  if (now <= lastMessageTs) {
+    lastMessageTs += 1;
+  } else {
+    lastMessageTs = now;
+  }
+  return new Date(lastMessageTs).toISOString();
 }
 
 function parseTimeMs(value) {
@@ -647,7 +658,7 @@ export async function postChannelMessage({ userId, channel, text }) {
     text: text.trim(),
     senderName: user.displayName,
     senderId: user.id,
-    createdAt: new Date().toISOString(),
+    createdAt: nextMessageIso(),
   };
 
   if (typeof store.addChannelMessage === 'function') {
@@ -743,7 +754,7 @@ export async function postPrivateMessage({ fromUserId, toUserId, text }) {
     fromUserId,
     toUserId,
     text: text.trim(),
-    createdAt: new Date().toISOString(),
+    createdAt: nextMessageIso(),
   };
   if (typeof store.addPrivateMessage === 'function') {
     await store.addPrivateMessage(message);
@@ -892,4 +903,5 @@ export function subscribeCommunityFeed({ userId, onEvent }) {
 
 export function resetCommunityRealtimeForTests() {
   communitySubscribers.clear();
+  lastMessageTs = 0;
 }

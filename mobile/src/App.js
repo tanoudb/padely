@@ -13,6 +13,7 @@ import { OnboardingScreen } from './screens/OnboardingScreen';
 import { HomeScreen } from './screens/HomeScreen';
 import { CommunityScreen } from './screens/CommunityScreen';
 import { ProfileScreen } from './screens/ProfileScreen';
+import { PlayerProfileScreen } from './screens/PlayerProfileScreen';
 import { PlaySetupScreen } from './screens/play/PlaySetupScreen';
 import { PlayScoringScreen } from './screens/play/PlayScoringScreen';
 import { PlayResultScreen } from './screens/play/PlayResultScreen';
@@ -83,6 +84,7 @@ function CommunityStackNavigator() {
   return (
     <CommunityStack.Navigator screenOptions={stackScreenOptions(palette)}>
       <CommunityStack.Screen name="CommunityMain" component={CommunityScreen} options={{ headerShown: false }} />
+      <CommunityStack.Screen name="PlayerProfile" component={PlayerProfileScreen} options={{ title: 'Joueur' }} />
     </CommunityStack.Navigator>
   );
 }

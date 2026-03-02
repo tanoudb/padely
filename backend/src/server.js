@@ -71,8 +71,10 @@ import {
 } from './services/profileService.js';
 import {
   getDashboard,
+  getHeadToHead,
   getDuoStats,
   getPerformanceHoles,
+  getRecords,
 } from './services/statsService.js';
 import { seedDemoData } from './store/seed.js';
 import { storageProvider } from './store/index.js';
@@ -369,24 +371,55 @@ const server = http.createServer(async (req, res) => {
     {
       const params = pathMatch(url.pathname, '/api/v1/stats/dashboard/:userId');
       if (req.method === 'GET' && params) {
-        await requireAuth(req);
-        return json(res, 200, await getDashboard(params.userId));
+        const me = await requireAuth(req);
+        return json(res, 200, await getDashboard(params.userId, {
+          period: url.searchParams.get('period') ?? 'all',
+          viewerId: me.id,
+        }));
       }
     }
 
     {
       const params = pathMatch(url.pathname, '/api/v1/stats/duo/:userId');
       if (req.method === 'GET' && params) {
-        await requireAuth(req);
-        return json(res, 200, await getDuoStats(params.userId));
+        const me = await requireAuth(req);
+        return json(res, 200, await getDuoStats(params.userId, {
+          period: url.searchParams.get('period') ?? 'all',
+          viewerId: me.id,
+        }));
+      }
+    }
+
+    {
+      const params = pathMatch(url.pathname, '/api/v1/stats/head-to-head/:userId/:opponentId');
+      if (req.method === 'GET' && params) {
+        const me = await requireAuth(req);
+        return json(res, 200, await getHeadToHead(params.userId, params.opponentId, {
+          period: url.searchParams.get('period') ?? 'all',
+          viewerId: me.id,
+        }));
+      }
+    }
+
+    {
+      const params = pathMatch(url.pathname, '/api/v1/stats/records/:userId');
+      if (req.method === 'GET' && params) {
+        const me = await requireAuth(req);
+        return json(res, 200, await getRecords(params.userId, {
+          period: url.searchParams.get('period') ?? 'all',
+          viewerId: me.id,
+        }));
       }
     }
 
     {
       const params = pathMatch(url.pathname, '/api/v1/stats/performance-holes/:userId');
       if (req.method === 'GET' && params) {
-        await requireAuth(req);
-        return json(res, 200, await getPerformanceHoles(params.userId));
+        const me = await requireAuth(req);
+        return json(res, 200, await getPerformanceHoles(params.userId, {
+          period: url.searchParams.get('period') ?? 'all',
+          viewerId: me.id,
+        }));
       }
     }
 
