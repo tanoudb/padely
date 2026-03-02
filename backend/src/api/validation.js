@@ -121,6 +121,26 @@ const updateProfileSchema = z.object({
   watchProvider: z.string().trim().min(2).max(40).optional(),
 }).passthrough();
 
+const onboardingSchema = z.object({
+  level: z.coerce.number().int().min(1).max(8),
+  quizAnswers: z.record(z.string().trim().min(1).max(80), z.string().trim().min(1).max(120)).optional().nullable(),
+  city: z.string().trim().min(2).max(80).optional(),
+  preferences: z.object({
+    defaultMatchMode: z.enum(['ranked', 'friendly']).optional(),
+    matchFormat: z.enum(['standard', 'club', 'marathon']).optional(),
+    pointRule: z.enum(['punto_de_oro', 'avantage']).optional(),
+    autoSaveMatch: z.boolean().optional(),
+    notifications: z.object({
+      matchInvites: z.boolean().optional(),
+      partnerAvailability: z.boolean().optional(),
+      leaderboardMovement: z.boolean().optional(),
+    }).optional(),
+    publicProfile: z.boolean().optional(),
+    showGuestMatches: z.boolean().optional(),
+    showHealthStats: z.boolean().optional(),
+  }).optional(),
+}).passthrough();
+
 export function validateRegisterPayload(payload) {
   return parseOrThrow(registerSchema, payload, 'Validation impossible pour inscription');
 }
@@ -139,4 +159,8 @@ export function validateMatchDecisionPayload(payload) {
 
 export function validateUpdateProfilePayload(payload) {
   return parseOrThrow(updateProfileSchema, payload, 'Validation impossible pour profil');
+}
+
+export function validateOnboardingPayload(payload) {
+  return parseOrThrow(onboardingSchema, payload, 'Validation impossible pour onboarding');
 }

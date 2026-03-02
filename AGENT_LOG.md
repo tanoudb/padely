@@ -267,3 +267,19 @@ Validation: backend tests `34/34` et exports Expo iOS/Android réussis (`npx exp
 ✅
 ### Prochaine mission recommandée
 PARTAGE SOCIAL (image de résultat premium + share sheet natif), dès que `react-native-view-shot` est installable
+
+## [2026-03-02] — Run #17
+### Mission
+ONBOARDING PREMIUM
+### Résultat
+L’onboarding est maintenant un vrai flow premium en 3 étapes animées (niveau, quiz, ville + préférences), avec progression visuelle et transitions fluides noir/or cohérentes avec Padely.
+Après login/verification, un nouveau joueur ne peut plus rater l’onboarding: l’app force ce passage puis sauvegarde directement ses préférences de jeu/notifications/profil public dans le backend.
+### Technique
+Backend: validation zod onboarding (`backend/src/api/validation.js`) + route sécurisée (`backend/src/server.js`) + enrichissement `completeOnboarding` (`backend/src/services/profileService.js`) pour persister `city`, `settings` (mode/format/pointRule/autoSave/notifications) et `privacy`.
+Mobile: gating onboarding dans le router (`mobile/src/App.js`), suppression auto-onboarding par défaut à l’inscription (`mobile/src/screens/AuthScreen.js`), refonte complète `mobile/src/screens/OnboardingScreen.js` (3 steps + dots + animations spring + ville + préférences), nouvelles clés i18n FR/EN (`mobile/src/i18n/dictionaries.js`).
+Tests: nouveau test service onboarding (`backend/test/onboardingFlow.test.js`) + extension validation (`backend/test/requestValidation.test.js`); suite backend verte `36/36`.
+Validation build: exports Expo iOS et Android réussis.
+### Statut
+✅
+### Prochaine mission recommandée
+PARTAGE SOCIAL (image résultat premium + share sheet) dès que la dépendance capture image est installable hors mode offline

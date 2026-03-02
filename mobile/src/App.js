@@ -173,7 +173,22 @@ function AuthNavigator() {
   return (
     <AuthStack.Navigator screenOptions={stackScreenOptions(palette)}>
       <AuthStack.Screen name="AuthMain" component={AuthScreen} options={{ headerShown: false }} />
-      <AuthStack.Screen name="Onboarding" component={OnboardingScreen} options={{ title: 'Onboarding' }} />
+    </AuthStack.Navigator>
+  );
+}
+
+function OnboardingNavigator() {
+  const { palette } = useUi();
+  return (
+    <AuthStack.Navigator screenOptions={stackScreenOptions(palette)}>
+      <AuthStack.Screen
+        name="Onboarding"
+        component={OnboardingScreen}
+        options={{
+          headerShown: false,
+          gestureEnabled: false,
+        }}
+      />
     </AuthStack.Navigator>
   );
 }
@@ -327,6 +342,8 @@ function MainRouter() {
     >
       {!token || !user ? (
         <AuthNavigator />
+      ) : !user?.onboarding?.completed ? (
+        <OnboardingNavigator />
       ) : (
         <MainTabsNavigator
           communityBadgeCount={communityBadgeCount}

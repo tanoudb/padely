@@ -116,7 +116,7 @@ export function AuthScreen() {
           email.trim(),
           password,
           displayName.trim() || 'Player',
-          { level: 4, quizAnswers: null }
+          null
         );
         if (out?.requiresEmailVerification) {
           setNotice(t('auth.msgCodeSent'));

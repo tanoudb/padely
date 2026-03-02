@@ -7,6 +7,7 @@ import {
   validateCreateMatchPayload,
   validateLoginPayload,
   validateMatchDecisionPayload,
+  validateOnboardingPayload,
   validateRegisterPayload,
   validateUpdateProfilePayload,
 } from './api/validation.js';
@@ -237,7 +238,7 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'PUT' && url.pathname === '/api/v1/profile/onboarding') {
       const me = await requireAuth(req);
-      const payload = await readJson(req);
+      const payload = validateOnboardingPayload(await readJson(req));
       return json(res, 200, await completeOnboarding(me.id, payload));
     }
 

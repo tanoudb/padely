@@ -79,16 +79,52 @@ export async function completeOnboarding(userId, payload) {
   }
 
   const baseRating = ratingFromLevel(level);
+  const nextCity = typeof payload.city === 'string' && payload.city.trim()
+    ? payload.city.trim()
+    : user.city;
+  const preferences = payload.preferences ?? {};
+  const notifications = preferences.notifications ?? {};
+  const nextSettings = {
+    ...user.settings,
+    defaultMatchMode: preferences.defaultMatchMode ?? user.settings?.defaultMatchMode ?? 'ranked',
+    matchFormat: preferences.matchFormat ?? user.settings?.matchFormat ?? 'marathon',
+    pointRule: preferences.pointRule ?? user.settings?.pointRule ?? 'punto_de_oro',
+    autoSaveMatch: preferences.autoSaveMatch ?? user.settings?.autoSaveMatch ?? true,
+    notificationPreferences: {
+      ...(user.settings?.notificationPreferences ?? {}),
+      matchInvites: notifications.matchInvites ?? user.settings?.notificationPreferences?.matchInvites ?? true,
+      partnerAvailability: notifications.partnerAvailability ?? user.settings?.notificationPreferences?.partnerAvailability ?? true,
+      leaderboardMovement: notifications.leaderboardMovement ?? user.settings?.notificationPreferences?.leaderboardMovement ?? true,
+    },
+  };
+  const nextPrivacy = {
+    ...user.privacy,
+    publicProfile: preferences.publicProfile ?? user.privacy?.publicProfile ?? true,
+    showGuestMatches: preferences.showGuestMatches ?? user.privacy?.showGuestMatches ?? false,
+    showHealthStats: preferences.showHealthStats ?? user.privacy?.showHealthStats ?? true,
+  };
+
   const updated = await store.updateUser(userId, {
     athlete: {
       ...user.athlete,
       level,
     },
     rating: baseRating,
+    city: nextCity,
+    settings: nextSettings,
+    privacy: nextPrivacy,
     onboarding: {
       completed: true,
       quizAnswers: payload.quizAnswers ?? null,
       completedAt: new Date().toISOString(),
+      city: nextCity ?? null,
+      preferences: {
+        defaultMatchMode: nextSettings.defaultMatchMode,
+        matchFormat: nextSettings.matchFormat,
+        pointRule: nextSettings.pointRule,
+        autoSaveMatch: nextSettings.autoSaveMatch,
+        notifications: nextSettings.notificationPreferences,
+      },
     },
     calibration: {
       matchesPlayed: 0,

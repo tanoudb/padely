@@ -6,6 +6,7 @@ import {
   validateCreateMatchPayload,
   validateLoginPayload,
   validateMatchDecisionPayload,
+  validateOnboardingPayload,
   validateRegisterPayload,
   validateUpdateProfilePayload,
 } from '../src/api/validation.js';
@@ -104,4 +105,41 @@ test('auth rate limiter allows 5 attempts then blocks the 6th in one minute wind
 
   const nextWindow = limiter.consume('ip-1', 70_001);
   assert.equal(nextWindow.count, 1);
+});
+
+test('onboarding payload accepts city + preferences and rejects invalid values', () => {
+  const onboarding = validateOnboardingPayload({
+    level: 5,
+    city: 'Paris',
+    quizAnswers: {
+      vitres: 'Souvent',
+      filet: 'Maitrisee',
+    },
+    preferences: {
+      defaultMatchMode: 'ranked',
+      matchFormat: 'club',
+      pointRule: 'punto_de_oro',
+      autoSaveMatch: true,
+      notifications: {
+        matchInvites: true,
+        partnerAvailability: false,
+        leaderboardMovement: true,
+      },
+      publicProfile: true,
+      showGuestMatches: false,
+      showHealthStats: true,
+    },
+  });
+
+  assert.equal(onboarding.city, 'Paris');
+  assert.equal(onboarding.preferences.matchFormat, 'club');
+
+  assert.throws(
+    () => validateOnboardingPayload({ level: 11 }),
+    (error) => {
+      assert.ok(error instanceof RequestValidationError);
+      assert.equal(error.field, 'level');
+      return true;
+    }
+  );
 });
