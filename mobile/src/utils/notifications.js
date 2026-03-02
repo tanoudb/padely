@@ -10,7 +10,36 @@ Notifications.setNotificationHandler({
   }),
 });
 
-async function scheduleDaily({ hour, minute, title, body, data }) {
+const RHYTHM_CAP = {
+  light: 1,
+  regular: 2,
+  intense: 3,
+};
+
+const RHYTHM_SLOTS = {
+  light: [
+    { weekday: 5, hour: 18, minute: 30 },
+  ],
+  regular: [
+    { weekday: 3, hour: 18, minute: 30 },
+    { weekday: 6, hour: 12, minute: 15 },
+  ],
+  intense: [
+    { weekday: 2, hour: 18, minute: 30 },
+    { weekday: 4, hour: 12, minute: 15 },
+    { weekday: 6, hour: 20, minute: 0 },
+  ],
+};
+
+function normalizeRhythm(raw) {
+  const value = String(raw ?? '').toLowerCase();
+  if (value === 'light' || value === 'regular' || value === 'intense') {
+    return value;
+  }
+  return 'regular';
+}
+
+async function scheduleWeekly({ weekday, hour, minute, title, body, data }) {
   return Notifications.scheduleNotificationAsync({
     content: {
       title,
@@ -18,6 +47,7 @@ async function scheduleDaily({ hour, minute, title, body, data }) {
       data,
     },
     trigger: {
+      weekday,
       hour,
       minute,
       repeats: true,
@@ -37,35 +67,47 @@ export async function configureEngagementNotifications(settings = {}) {
   await Notifications.cancelAllScheduledNotificationsAsync();
   const ids = [];
   const language = settings.language === 'en' ? 'en' : 'fr';
+  const rhythm = normalizeRhythm(settings.playerRhythm);
   const txt = dictionaries[language]?.notifications ?? dictionaries.fr.notifications;
+  const slots = RHYTHM_SLOTS[rhythm];
+  const cap = RHYTHM_CAP[rhythm];
+  const candidates = [];
 
   if (settings.notifPartnerAvailable) {
-    ids.push(await scheduleDaily({
-      hour: 18,
-      minute: 30,
+    candidates.push({
       title: txt.partnerTitle,
-      body: txt.partnerBody,
+      body: rhythm === 'light' ? txt.partnerBodyLight : txt.partnerBody,
       data: { type: 'partner-availability' },
-    }));
+    });
   }
 
   if (settings.notifMatchInvite) {
-    ids.push(await scheduleDaily({
-      hour: 12,
-      minute: 15,
+    candidates.push({
       title: txt.inviteTitle,
-      body: txt.inviteBody,
+      body: rhythm === 'light' ? txt.inviteBodyLight : txt.inviteBody,
       data: { type: 'match-invite' },
-    }));
+    });
   }
 
   if (settings.notifLeaderboard) {
-    ids.push(await scheduleDaily({
-      hour: 20,
-      minute: 0,
+    candidates.push({
       title: txt.leaderboardTitle,
-      body: txt.leaderboardBody,
+      body: rhythm === 'light' ? txt.leaderboardBodyLight : txt.leaderboardBody,
       data: { type: 'leaderboard' },
+    });
+  }
+
+  const scheduledCandidates = candidates.slice(0, Math.min(cap, slots.length));
+  for (let index = 0; index < scheduledCandidates.length; index += 1) {
+    const slot = slots[index];
+    const item = scheduledCandidates[index];
+    ids.push(await scheduleWeekly({
+      weekday: slot.weekday,
+      hour: slot.hour,
+      minute: slot.minute,
+      title: item.title,
+      body: item.body,
+      data: item.data,
     }));
   }
 

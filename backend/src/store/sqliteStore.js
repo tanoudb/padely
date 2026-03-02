@@ -48,6 +48,19 @@ function parseJson(value, fallback) {
   }
 }
 
+const DEFAULT_SETTINGS = {
+  pointRule: 'punto_de_oro',
+  matchFormat: 'marathon',
+  autoSideSwitch: true,
+  playerRhythm: 'regular',
+};
+
+const DEFAULT_PRIVACY = {
+  publicProfile: true,
+  showGuestMatches: false,
+  showHealthStats: true,
+};
+
 function normalizeUser(raw) {
   if (!raw) {
     return null;
@@ -58,15 +71,13 @@ function normalizeUser(raw) {
     ...raw,
     athlete: raw.athlete ?? { weightKg: null, heightCm: null, level: null },
     onboarding: raw.onboarding ?? { completed: false, quizAnswers: null },
-    settings: raw.settings ?? {
-      pointRule: 'punto_de_oro',
-      matchFormat: 'marathon',
-      autoSideSwitch: true,
+    settings: {
+      ...DEFAULT_SETTINGS,
+      ...(raw.settings && typeof raw.settings === 'object' ? raw.settings : {}),
     },
-    privacy: raw.privacy ?? {
-      publicProfile: true,
-      showGuestMatches: false,
-      showHealthStats: true,
+    privacy: {
+      ...DEFAULT_PRIVACY,
+      ...(raw.privacy && typeof raw.privacy === 'object' ? raw.privacy : {}),
     },
     community: {
       customChannels: Array.isArray(community.customChannels) ? community.customChannels : [],

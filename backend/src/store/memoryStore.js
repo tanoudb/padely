@@ -87,6 +87,7 @@ export class MemoryStore {
         pointRule: 'punto_de_oro',
         matchFormat: 'marathon',
         autoSideSwitch: true,
+        playerRhythm: 'regular',
       },
       privacy: {
         publicProfile: true,

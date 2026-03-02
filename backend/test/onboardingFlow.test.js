@@ -23,6 +23,7 @@ test('complete onboarding persists city and gameplay preferences', async () => {
       defaultMatchMode: 'friendly',
       matchFormat: 'club',
       pointRule: 'avantage',
+      playerRhythm: 'light',
       autoSaveMatch: false,
       notifications: {
         matchInvites: true,
@@ -41,8 +42,10 @@ test('complete onboarding persists city and gameplay preferences', async () => {
   assert.equal(profile.settings.defaultMatchMode, 'friendly');
   assert.equal(profile.settings.matchFormat, 'club');
   assert.equal(profile.settings.pointRule, 'avantage');
+  assert.equal(profile.settings.playerRhythm, 'light');
   assert.equal(profile.settings.autoSaveMatch, false);
   assert.equal(profile.settings.notificationPreferences.partnerAvailability, false);
+  assert.equal(profile.onboarding.preferences.playerRhythm, 'light');
   assert.equal(profile.privacy.publicProfile, false);
   assert.equal(profile.privacy.showGuestMatches, true);
   assert.equal(profile.privacy.showHealthStats, false);

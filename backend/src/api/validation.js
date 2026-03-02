@@ -129,6 +129,7 @@ const onboardingSchema = z.object({
     defaultMatchMode: z.enum(['ranked', 'friendly']).optional(),
     matchFormat: z.enum(['standard', 'club', 'marathon']).optional(),
     pointRule: z.enum(['punto_de_oro', 'avantage']).optional(),
+    playerRhythm: z.enum(['light', 'regular', 'intense']).optional(),
     autoSaveMatch: z.boolean().optional(),
     notifications: z.object({
       matchInvites: z.boolean().optional(),

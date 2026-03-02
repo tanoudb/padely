@@ -3,6 +3,31 @@ import { evaluateBadges } from './gamificationService.js';
 
 const VALID_PERIODS = new Set(['week', 'month', 'season', 'all']);
 const HEATMAP_DAYS = 84;
+const DAY_MS = 86_400_000;
+
+const RHYTHM_RULES = {
+  light: {
+    key: 'light',
+    windowDays: 30,
+    targetActivities: 1,
+    returnThresholdDays: 35,
+    notificationCapWeekly: 1,
+  },
+  regular: {
+    key: 'regular',
+    windowDays: 10,
+    targetActivities: 1,
+    returnThresholdDays: 16,
+    notificationCapWeekly: 2,
+  },
+  intense: {
+    key: 'intense',
+    windowDays: 7,
+    targetActivities: 2,
+    returnThresholdDays: 10,
+    notificationCapWeekly: 3,
+  },
+};
 
 async function matchesForUser(userId) {
   return (await store.listMatchesForUser(userId)).filter((m) => m.status === 'validated');
@@ -27,6 +52,352 @@ function average(values) {
     return 0;
   }
   return values.reduce((s, v) => s + v, 0) / values.length;
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function uniqueActivityDays(matches = []) {
+  return new Set(matches
+    .map((match) => {
+      const ms = matchTimeMs(match);
+      if (!ms) return '';
+      return startOfDay(new Date(ms)).toISOString().slice(0, 10);
+    })
+    .filter(Boolean)).size;
+}
+
+function getPlayerRhythm(user) {
+  const raw = String(user?.settings?.playerRhythm ?? '').toLowerCase();
+  if (raw === 'light' || raw === 'regular' || raw === 'intense') {
+    return raw;
+  }
+  return 'regular';
+}
+
+function matchesInLastDays(matches = [], days = 30) {
+  const threshold = Date.now() - days * DAY_MS;
+  return matches.filter((match) => matchTimeMs(match) >= threshold);
+}
+
+function computePlayerProfileType({ recent30 = [], recent90 = [] }) {
+  const matches30 = recent30.length;
+  const matches90 = recent90.length;
+  const rankedShare = matches30
+    ? recent30.filter((match) => String(match.mode ?? '').toLowerCase() === 'ranked').length / matches30
+    : 0;
+
+  if (matches30 <= 1 && matches90 <= 4) {
+    return 'chill';
+  }
+  if (matches30 >= 8 || (matches30 >= 4 && rankedShare >= 0.65)) {
+    return 'competitor';
+  }
+  return 'regular';
+}
+
+function computeFrequencyScore(activitiesInWindow, rhythm) {
+  return clamp(Math.round((activitiesInWindow / rhythm.targetActivities) * 100), 0, 100);
+}
+
+function computeResultScore(matches, userId) {
+  const recent = [...matches]
+    .sort((a, b) => matchTimeMs(b) - matchTimeMs(a))
+    .slice(0, 8);
+  if (!recent.length) {
+    return 40;
+  }
+  const wins = recent.filter((match) => didUserWin(match, userId)).length;
+  const winRate = wins / recent.length;
+  return clamp(Math.round(20 + winRate * 80), 0, 100);
+}
+
+function computeProgressScore(user, consistencyScore) {
+  const history = Array.isArray(user?.history) ? user.history : [];
+  if (history.length < 2) {
+    return clamp(Math.round(45 + (consistencyScore - 50) * 0.25), 0, 100);
+  }
+  const recent = history.slice(-8);
+  const ratingDelta = recent.reduce((sum, item) => sum + Number(item?.delta ?? 0), 0);
+  const boundedMomentum = clamp(ratingDelta, -80, 80);
+  const base = 50 + boundedMomentum * 0.45 + (consistencyScore - 50) * 0.35;
+  return clamp(Math.round(base), 0, 100);
+}
+
+function computeFormData({ user, allMatches, userId, consistencyScore, rhythmKey }) {
+  const rhythm = RHYTHM_RULES[rhythmKey] ?? RHYTHM_RULES.regular;
+  const windowMatches = matchesInLastDays(allMatches, rhythm.windowDays);
+  const activitiesInWindow = uniqueActivityDays(windowMatches);
+  const frequencyScore = computeFrequencyScore(activitiesInWindow, rhythm);
+  const resultsScore = computeResultScore(allMatches, userId);
+  const progressScore = computeProgressScore(user, consistencyScore);
+  const score = clamp(
+    Math.round(frequencyScore * 0.5 + resultsScore * 0.3 + progressScore * 0.2),
+    0,
+    100,
+  );
+
+  return {
+    score,
+    frequencyScore,
+    resultsScore,
+    progressScore,
+    activitiesInWindow,
+    targetActivities: rhythm.targetActivities,
+    windowDays: rhythm.windowDays,
+  };
+}
+
+function computeSmartStreak(allMatches, rhythmKey) {
+  const rhythm = RHYTHM_RULES[rhythmKey] ?? RHYTHM_RULES.regular;
+  const sorted = [...allMatches].sort((a, b) => matchTimeMs(b) - matchTimeMs(a));
+  const latestMs = sorted.length ? matchTimeMs(sorted[0]) : 0;
+  const lastActivityAt = latestMs ? new Date(latestMs).toISOString() : null;
+  const daysSinceLastActivity = latestMs ? Math.floor((Date.now() - latestMs) / DAY_MS) : null;
+
+  if (!sorted.length) {
+    return {
+      count: 0,
+      unit: rhythm.windowDays >= 28 ? 'month' : (rhythm.windowDays <= 7 ? 'week' : 'window'),
+      windowDays: rhythm.windowDays,
+      targetActivities: rhythm.targetActivities,
+      lastActivityAt,
+      daysSinceLastActivity,
+    };
+  }
+
+  const activityDays = new Set(sorted
+    .map((match) => startOfDay(new Date(matchTimeMs(match))).getTime()));
+
+  let count = 0;
+  let cursorEnd = startOfDay(new Date());
+  while (count < 18) {
+    const windowStart = new Date(cursorEnd);
+    windowStart.setDate(windowStart.getDate() - (rhythm.windowDays - 1));
+    let windowActivities = 0;
+
+    for (const dayMs of activityDays) {
+      if (dayMs >= windowStart.getTime() && dayMs <= cursorEnd.getTime()) {
+        windowActivities += 1;
+      }
+    }
+
+    if (windowActivities >= rhythm.targetActivities) {
+      count += 1;
+      cursorEnd = new Date(windowStart);
+      cursorEnd.setDate(cursorEnd.getDate() - 1);
+      continue;
+    }
+    break;
+  }
+
+  return {
+    count,
+    unit: rhythm.windowDays >= 28 ? 'month' : (rhythm.windowDays <= 7 ? 'week' : 'window'),
+    windowDays: rhythm.windowDays,
+    targetActivities: rhythm.targetActivities,
+    lastActivityAt,
+    daysSinceLastActivity,
+  };
+}
+
+function buildReturnMode({ smartStreak, rhythmKey }) {
+  const rhythm = RHYTHM_RULES[rhythmKey] ?? RHYTHM_RULES.regular;
+  const pauseDays = Number(smartStreak?.daysSinceLastActivity);
+  if (!Number.isFinite(pauseDays)) {
+    return {
+      active: false,
+      pauseDays: 0,
+      bonusForm: 0,
+      reason: 'new_player',
+    };
+  }
+
+  const active = pauseDays >= rhythm.returnThresholdDays;
+  if (!active) {
+    return {
+      active: false,
+      pauseDays,
+      bonusForm: 0,
+      reason: 'active_cycle',
+    };
+  }
+
+  return {
+    active: true,
+    pauseDays,
+    bonusForm: clamp(Math.round(pauseDays / 7), 2, 12),
+    reason: 'long_break',
+  };
+}
+
+function buildAdaptiveObjective({ form, rhythmKey, returnMode }) {
+  const rhythm = RHYTHM_RULES[rhythmKey] ?? RHYTHM_RULES.regular;
+  const remainingActivities = Math.max(0, rhythm.targetActivities - Number(form.activitiesInWindow ?? 0));
+
+  if (returnMode.active) {
+    return {
+      mode: 'return',
+      remainingActivities,
+      targetActivities: rhythm.targetActivities,
+      windowDays: rhythm.windowDays,
+    };
+  }
+
+  if (remainingActivities > 0) {
+    return {
+      mode: 'chase',
+      remainingActivities,
+      targetActivities: rhythm.targetActivities,
+      windowDays: rhythm.windowDays,
+    };
+  }
+
+  return {
+    mode: 'maintain',
+    remainingActivities: 0,
+    targetActivities: rhythm.targetActivities,
+    windowDays: rhythm.windowDays,
+  };
+}
+
+function computeNarrativePhase(allMatches, user) {
+  const totalMatches = allMatches.length;
+  const recent = [...allMatches].sort((a, b) => matchTimeMs(b) - matchTimeMs(a)).slice(0, 8);
+  const recentWins = recent.filter((match) => didUserWin(match, user.id)).length;
+  const winRate = recent.length ? recentWins / recent.length : 0;
+  const recentDelta = (Array.isArray(user.history) ? user.history : [])
+    .slice(-8)
+    .reduce((sum, entry) => sum + Number(entry?.delta ?? 0), 0);
+
+  if (totalMatches < 3) return 'debuts';
+  if (totalMatches < 8) return 'apprentissage';
+  if (recentDelta >= 40 && winRate >= 0.55) return 'declic';
+  if (winRate >= 0.65 && totalMatches >= 12) return 'confirmation';
+  if (winRate < 0.45 && totalMatches >= 8) return 'stagnation';
+  return 'nouveau_cap';
+}
+
+function buildLatestMatchInsight(match, user, returnMode) {
+  if (!match) {
+    return null;
+  }
+
+  const isTeamA = (match.teamA ?? []).includes(user.id);
+  const myTeam = participantsForMatch(match, isTeamA ? 'teamA' : 'teamB');
+  const oppTeam = participantsForMatch(match, isTeamA ? 'teamB' : 'teamA');
+  const sets = match.sets ?? [];
+
+  const setDiffs = sets.map((set) => Math.abs(Number(set.a ?? 0) - Number(set.b ?? 0)));
+  const avgSetDiff = setDiffs.length ? average(setDiffs) : 4;
+  const closeness = clamp(Math.round(100 - avgSetDiff * 18), 0, 100);
+  const myStrength = teamStrengthFromParticipants(myTeam, [Number(user.rating ?? 1200), Number(user.rating ?? 1200)]);
+  const oppStrength = teamStrengthFromParticipants(oppTeam, [1200, 1200]);
+  const proximity = clamp(Math.round(100 - Math.abs(oppStrength - myStrength) / 3), 0, 100);
+  const tieBreakLike = sets.some((set) => Math.abs(Number(set.a ?? 0) - Number(set.b ?? 0)) === 1);
+  const importanceScore = clamp(
+    Math.round(closeness * 0.55 + proximity * 0.35 + (tieBreakLike ? 10 : 0)),
+    0,
+    100,
+  );
+
+  let importanceLabel = 'normal';
+  if (importanceScore >= 80) importanceLabel = 'key';
+  else if (importanceScore >= 60) importanceLabel = 'high';
+  else if (importanceScore < 35) importanceLabel = 'low';
+
+  let stressLabel = 'controlled';
+  if (closeness <= 35) stressLabel = 'easy';
+  else if (closeness >= 78 && (tieBreakLike || sets.length >= 3)) stressLabel = 'combat';
+  else if (closeness >= 60) stressLabel = 'chaos';
+
+  const didWin = didUserWin(match, user.id);
+  const myFirstSet = sets[0]
+    ? (isTeamA ? Number(sets[0].a ?? 0) : Number(sets[0].b ?? 0))
+    : 0;
+  const oppFirstSet = sets[0]
+    ? (isTeamA ? Number(sets[0].b ?? 0) : Number(sets[0].a ?? 0))
+    : 0;
+  const lostFirstSet = sets.length > 0 && myFirstSet < oppFirstSet;
+
+  const momentTags = [];
+  if (didWin && lostFirstSet) momentTags.push('remontada');
+  if (tieBreakLike) momentTags.push('match_serre');
+  if (Number(match.goldenPoints?.teamA ?? 0) + Number(match.goldenPoints?.teamB ?? 0) > 0) {
+    momentTags.push('golden_point');
+  }
+  if (returnMode?.active) momentTags.push('comeback');
+
+  return {
+    matchId: match.id,
+    importanceScore,
+    importanceLabel,
+    stressLabel,
+    momentTags: momentTags.slice(0, 3),
+    didWin,
+    score: sets.map((set) => `${set.a}-${set.b}`).join(' / '),
+  };
+}
+
+function computeBestPartner(matches, userId) {
+  const map = new Map();
+  for (const match of matches) {
+    const teamA = participantsForMatch(match, 'teamA');
+    const teamB = participantsForMatch(match, 'teamB');
+    const myTeam = teamA.some((slot) => slot.kind === 'user' && slot.userId === userId) ? teamA : teamB;
+    const partner = myTeam.find((slot) => slot.kind === 'user' && slot.userId !== userId);
+    if (!partner?.userId) continue;
+    const key = partner.userId;
+    if (!map.has(key)) {
+      map.set(key, { partnerId: key, matches: 0, wins: 0 });
+    }
+    const entry = map.get(key);
+    entry.matches += 1;
+    if (didUserWin(match, userId)) {
+      entry.wins += 1;
+    }
+  }
+
+  const rows = [...map.values()].map((item) => ({
+    ...item,
+    winRate: item.matches ? Number(((item.wins / item.matches) * 100).toFixed(1)) : 0,
+  }));
+
+  if (!rows.length) return null;
+  rows.sort((a, b) => {
+    if (b.winRate !== a.winRate) return b.winRate - a.winRate;
+    return b.matches - a.matches;
+  });
+  return rows[0];
+}
+
+function computeRivalryNarrative(matches, userId, usersById) {
+  const opponentMap = new Map();
+  for (const match of matches) {
+    const isTeamA = (match.teamA ?? []).includes(userId);
+    const opponents = participantsForMatch(match, isTeamA ? 'teamB' : 'teamA')
+      .filter((slot) => slot.kind === 'user' && slot.userId);
+    for (const opp of opponents) {
+      if (!opponentMap.has(opp.userId)) {
+        opponentMap.set(opp.userId, { opponentId: opp.userId, matches: 0, wins: 0, losses: 0 });
+      }
+      const row = opponentMap.get(opp.userId);
+      row.matches += 1;
+      if (didUserWin(match, userId)) row.wins += 1;
+      else row.losses += 1;
+    }
+  }
+
+  const rivalries = [...opponentMap.values()].sort((a, b) => b.matches - a.matches);
+  const top = rivalries[0] ?? null;
+  if (!top) return null;
+
+  return {
+    ...top,
+    opponentName: usersById.get(top.opponentId)?.displayName ?? 'Adversaire',
+    unbeatenByUser: top.wins === 0 && top.matches >= 2,
+  };
 }
 
 function playerWatch(match, userId) {
@@ -301,6 +672,10 @@ export async function getDashboard(userId, options = {}) {
 
   const allMatches = await matchesForUser(userId);
   const matches = filterMatchesByPeriod(allMatches, period);
+  const recent30 = matchesInLastDays(allMatches, 30);
+  const recent90 = matchesInLastDays(allMatches, 90);
+  const rhythmKey = getPlayerRhythm(user);
+  const rhythm = RHYTHM_RULES[rhythmKey] ?? RHYTHM_RULES.regular;
   const minutes = matches.reduce((sum, m) => sum + estimateMinutes(m), 0);
 
   const wins = matches.filter((m) => didUserWin(m, userId)).length;
@@ -312,12 +687,53 @@ export async function getDashboard(userId, options = {}) {
   const averageHeartRate = Math.round(average(watches.filter((w) => w.heartRateAvg > 0).map((w) => w.heartRateAvg)));
   const averageOxygen = Math.round(average(watches.filter((w) => w.oxygenAvg > 0).map((w) => w.oxygenAvg)));
 
+  const consistencyScore = computeConsistencyScore(matches, userId);
+  const regularityScore = computeRegularityScore(matches);
+  const form = computeFormData({
+    user,
+    allMatches,
+    userId,
+    consistencyScore,
+    rhythmKey,
+  });
+  const smartStreak = computeSmartStreak(allMatches, rhythmKey);
+  const returnMode = buildReturnMode({ smartStreak, rhythmKey });
+  const usersById = await usersMapFromMatches(allMatches);
+  const recentValidated = [...allMatches].sort((a, b) => matchTimeMs(b) - matchTimeMs(a));
+  const latestMatch = recentValidated[0] ?? null;
+  const latestMatchInsight = buildLatestMatchInsight(latestMatch, user, returnMode);
+  const bestPartner = computeBestPartner(allMatches, userId);
+  const rivalry = computeRivalryNarrative(allMatches, userId, usersById);
+  const narrativePhase = computeNarrativePhase(allMatches, user);
+  const playerProfileType = computePlayerProfileType({
+    recent30,
+    recent90,
+  });
+  const adaptiveObjective = buildAdaptiveObjective({
+    form,
+    rhythmKey,
+    returnMode,
+  });
+
   return {
     userId,
     period,
     seasonLabel: currentSeasonLabel(),
     rating: user.rating,
     pir: user.pir,
+    playerRhythm: rhythmKey,
+    rhythm: {
+      ...rhythm,
+    },
+    playerProfileType,
+    form,
+    smartStreak,
+    returnMode,
+    adaptiveObjective,
+    narrativePhase,
+    latestMatchInsight,
+    bestPartner,
+    rivalry,
     matches: matches.length,
     wins,
     losses,
@@ -327,8 +743,8 @@ export async function getDashboard(userId, options = {}) {
     averageDistanceKm,
     averageHeartRate,
     averageOxygen,
-    consistencyScore: computeConsistencyScore(matches, userId),
-    regularityScore: computeRegularityScore(matches),
+    consistencyScore,
+    regularityScore,
     progression: user.history ?? [],
     activityHeatmap: buildActivityHeatmap(matches),
   };

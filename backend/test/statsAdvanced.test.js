@@ -48,12 +48,26 @@ test('advanced stats expose period filtering, records and head-to-head', async (
     createdBy: me.id,
   });
 
+  await store.updateUser(me.id, {
+    settings: {
+      ...(me.settings ?? {}),
+      playerRhythm: 'light',
+    },
+  });
+
   const dashboardAll = await getDashboard(me.id, { viewerId: me.id, period: 'all' });
   const dashboardMonth = await getDashboard(me.id, { viewerId: me.id, period: 'month' });
   assert.equal(dashboardAll.matches, 2);
   assert.equal(dashboardMonth.matches, 1);
   assert.equal(dashboardMonth.period, 'month');
   assert.ok(Array.isArray(dashboardMonth.activityHeatmap));
+  assert.equal(dashboardAll.playerRhythm, 'light');
+  assert.ok(typeof dashboardAll.playerProfileType === 'string');
+  assert.ok(typeof dashboardAll.form?.score === 'number');
+  assert.ok(typeof dashboardAll.smartStreak?.count === 'number');
+  assert.ok(typeof dashboardAll.returnMode?.active === 'boolean');
+  assert.ok(typeof dashboardAll.adaptiveObjective?.mode === 'string');
+  assert.ok(typeof dashboardAll.narrativePhase === 'string');
 
   const head = await getHeadToHead(me.id, opp1.id, { viewerId: me.id, period: 'all' });
   assert.equal(head.totalMatches, 2);

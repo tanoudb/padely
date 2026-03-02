@@ -94,6 +94,7 @@ export class FirestoreStore {
         pointRule: 'punto_de_oro',
         matchFormat: 'marathon',
         autoSideSwitch: true,
+        playerRhythm: 'regular',
       },
       privacy: {
         publicProfile: true,

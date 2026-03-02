@@ -48,6 +48,15 @@ function periodLabel(period, t) {
   return t('profile.periodAll');
 }
 
+function isUnauthorizedErrorMessage(message) {
+  const raw = String(message ?? '').toLowerCase();
+  return raw.includes('authentication required')
+    || raw.includes('unauthorized')
+    || raw.includes('missing auth token')
+    || raw.includes('invalid token')
+    || raw.includes('session expiree');
+}
+
 function StatLine({ label, value, palette }) {
   return (
     <View style={[styles.line, { borderBottomColor: palette.line }]}>
@@ -180,7 +189,7 @@ function BadgeGrid({ catalog, palette }) {
 
 export function ProfileScreen() {
   const insets = useSafeAreaInsets();
-  const { token, user } = useSession();
+  const { token, user, logout } = useSession();
   const { t } = useI18n();
   const { palette } = useUi();
 
@@ -225,7 +234,12 @@ export function ProfileScreen() {
         });
       }
     } catch (e) {
-      setLoadError(e.message || 'Impossible de charger le profil.');
+      const message = e.message || 'Impossible de charger le profil.';
+      if (isUnauthorizedErrorMessage(message)) {
+        logout();
+        return;
+      }
+      setLoadError(message);
     }
   }
 
@@ -262,15 +276,53 @@ export function ProfileScreen() {
   const bestDuo = sortedDuos[0] ?? null;
   const rating = dashboard?.rating ?? user.rating ?? 1200;
   const pir = dashboard?.pir ?? user.pir ?? 50;
+  const formScore = Number(dashboard?.form?.score ?? 0);
+  const playerProfileType = dashboard?.playerProfileType ?? 'regular';
+  const playerRhythm = dashboard?.playerRhythm ?? user.settings?.playerRhythm ?? 'regular';
+  const smartStreak = dashboard?.smartStreak ?? null;
+  const streakUnit = smartStreak?.unit ?? 'day';
+  const streakCount = Number(smartStreak?.count ?? 0);
+  const adaptiveObjective = dashboard?.adaptiveObjective ?? null;
+  const returnMode = dashboard?.returnMode ?? null;
+  const latestMatchInsight = dashboard?.latestMatchInsight ?? null;
+  const narrativePhase = dashboard?.narrativePhase ?? 'nouveau_cap';
+  const progressionTimeline = (dashboard?.progression ?? [])
+    .slice(-4)
+    .reverse()
+    .map((item) => ({
+      at: item?.at ?? null,
+      delta: Number(item?.delta ?? 0),
+      pir: Number(item?.pir ?? item?.rating ?? 0),
+    }));
+  const streakLabel = streakUnit === 'month'
+    ? t('profile.streakMonths')
+    : streakUnit === 'week'
+      ? t('profile.streakWeeks')
+      : streakUnit === 'window'
+        ? t('profile.streakWindows')
+        : t('profile.streakDays');
+  const objectiveLine = adaptiveObjective?.mode === 'return'
+    ? t('profile.objectiveReturn', { count: adaptiveObjective.targetActivities, days: adaptiveObjective.windowDays })
+    : adaptiveObjective?.mode === 'chase'
+      ? t('profile.objectiveChase', { count: adaptiveObjective.remainingActivities, days: adaptiveObjective.windowDays })
+      : adaptiveObjective
+        ? t('profile.objectiveMaintain', { count: adaptiveObjective.targetActivities, days: adaptiveObjective.windowDays })
+        : t('profile.objectiveFallback');
+  const momentLine = (latestMatchInsight?.momentTags ?? [])
+    .map((tag) => t(`profile.moment_${tag}`))
+    .filter(Boolean)
+    .slice(0, 3)
+    .join(' · ');
   const isLoading = !dashboard && !records;
   const pirLive = useCountUp(pir);
   const ratingLive = useCountUp(rating);
   const identityEntry = useStaggeredEntry(0, !isLoading);
-  const statsEntry = useStaggeredEntry(1, !isLoading);
-  const recordsEntry = useStaggeredEntry(2, !isLoading);
-  const badgesEntry = useStaggeredEntry(3, !isLoading);
-  const heatmapEntry = useStaggeredEntry(4, !isLoading);
-  const ctaEntry = useStaggeredEntry(5, !isLoading);
+  const momentumEntry = useStaggeredEntry(1, !isLoading);
+  const statsEntry = useStaggeredEntry(2, !isLoading);
+  const recordsEntry = useStaggeredEntry(3, !isLoading);
+  const badgesEntry = useStaggeredEntry(4, !isLoading);
+  const heatmapEntry = useStaggeredEntry(5, !isLoading);
+  const ctaEntry = useStaggeredEntry(6, !isLoading);
   const ctaBounce = useScaleBounce(sortedDuos.length);
   const initials = (user.displayName ?? 'P').slice(0, 2).toUpperCase();
   const arcadeTag = user.arcadeTag ?? `${(user.displayName ?? 'PLAYER').replace(/\s+/g, '').slice(0, 7).toUpperCase()}#${String(user.id ?? '').slice(-4).toUpperCase()}`;
@@ -419,6 +471,59 @@ export function ProfileScreen() {
             </Card>
           </AnimatedView>
 
+          <AnimatedView style={momentumEntry}>
+            <Card elevated>
+              <Text style={[styles.cardTitle, { color: palette.text }]}>{t('profile.momentumTitle')}</Text>
+              <Text style={[styles.meta, { color: palette.textSecondary }]}>
+                {t('profile.formLine', {
+                  form: formScore,
+                  profile: t(`profile.profileType_${playerProfileType}`),
+                })}
+              </Text>
+              <Text style={[styles.meta, { color: palette.textSecondary }]}>
+                {t('profile.rhythmLine', {
+                  rhythm: t(`profile.rhythm_${playerRhythm}`),
+                  count: streakCount,
+                  unit: streakLabel,
+                })}
+              </Text>
+              <Text style={[styles.meta, { color: palette.accent }]}>{objectiveLine}</Text>
+              {returnMode?.active ? (
+                <Text style={[styles.meta, { color: palette.accent2 }]}>
+                  {t('profile.returnModeLine', { days: returnMode.pauseDays, bonus: returnMode.bonusForm })}
+                </Text>
+              ) : null}
+              {latestMatchInsight ? (
+                <Text style={[styles.meta, { color: palette.textSecondary }]}>
+                  {t('profile.latestMatchLine', {
+                    score: latestMatchInsight.score,
+                    importance: t(`profile.importance_${latestMatchInsight.importanceLabel}`),
+                  })}
+                </Text>
+              ) : null}
+              {momentLine ? (
+                <Text style={[styles.meta, { color: palette.accent }]}>{momentLine}</Text>
+              ) : null}
+              <Text style={[styles.meta, { color: palette.textSecondary }]}>
+                {t(`profile.narrative_${narrativePhase}`)}
+              </Text>
+              <View style={[styles.timelineBox, { borderColor: palette.line, backgroundColor: palette.bgAlt }]}>
+                {progressionTimeline.length ? progressionTimeline.map((entry, index) => (
+                  <View key={`${entry.at}_${index}`} style={[styles.timelineRow, { borderBottomColor: palette.line }]}>
+                    <Text style={[styles.timelineDate, { color: palette.textSecondary }]}>
+                      {entry.at ? new Date(entry.at).toLocaleDateString() : t('profile.timelineUnknown')}
+                    </Text>
+                    <Text style={[styles.timelineDelta, { color: entry.delta >= 0 ? palette.accent2 : palette.danger }]}>
+                      {entry.delta >= 0 ? `+${entry.delta}` : `${entry.delta}`}
+                    </Text>
+                  </View>
+                )) : (
+                  <Text style={[styles.meta, { color: palette.textSecondary }]}>{t('profile.timelineEmpty')}</Text>
+                )}
+              </View>
+            </Card>
+          </AnimatedView>
+
           <AnimatedView style={statsEntry}>
             <Card>
               <Text style={[styles.cardTitle, { color: palette.text }]}>{t('profile.global')}</Text>
@@ -519,6 +624,29 @@ const styles = StyleSheet.create({
   label: { fontFamily: theme.fonts.body },
   value: { fontFamily: theme.fonts.title },
   meta: { fontFamily: theme.fonts.body, marginTop: 2 },
+  timelineBox: {
+    marginTop: 10,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    gap: 2,
+  },
+  timelineRow: {
+    minHeight: 28,
+    borderBottomWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  timelineDate: {
+    fontFamily: theme.fonts.body,
+    fontSize: 12,
+  },
+  timelineDelta: {
+    fontFamily: theme.fonts.title,
+    fontSize: 12,
+  },
   shareTagBtn: {
     marginTop: 8,
     minHeight: 34,

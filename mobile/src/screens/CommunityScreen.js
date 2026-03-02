@@ -7,8 +7,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { API_URL, api } from '../api/client';
 import { Card } from '../components/Card';
 import { QrScannerModal } from '../components/QrScannerModal';
+import { CourtPattern } from '../components/CourtPattern';
 import { useI18n } from '../state/i18n';
 import { useSession } from '../state/session';
+import { useUi } from '../state/ui';
 import { theme } from '../theme';
 import { createCommunitySubscription } from '../utils/communityStream';
 
@@ -142,6 +144,7 @@ export function CommunityScreen() {
   const route = useRoute();
   const isFocused = useIsFocused();
   const { token, user } = useSession();
+  const { palette, mode } = useUi();
   const { t } = useI18n();
 
   const [activeTab, setActiveTab] = useState('home');
@@ -638,23 +641,38 @@ export function CommunityScreen() {
     ? t('community.authRequired')
     : error;
 
+  const heroGradient = mode === 'day'
+    ? ['#2C8F66', '#2A6E86', '#1E5165']
+    : ['#114031', '#143642', '#122A35'];
+  const regionalGradient = mode === 'day'
+    ? ['#4D9B67', '#317A57']
+    : ['#1C503A', '#1A3F30'];
+  const channelsGradient = mode === 'day'
+    ? ['#387A9C', '#2E5F86']
+    : ['#1A4059', '#1A3147'];
+  const clubsGradient = mode === 'day'
+    ? ['#C58747', '#8C5D33']
+    : ['#8B5A2C', '#66411F'];
+
   return (
-    <ScrollView
-      style={styles.root}
-      contentContainerStyle={[styles.content, { paddingTop: Math.max(insets.top + 8, 24) }]}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.accent2} />}
-    >
-      <LinearGradient colors={['#163448', '#0C2333', '#081823']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
-        <Text style={styles.heroTitle} numberOfLines={1}>{t('community.title')}</Text>
-        <Text style={styles.heroGreeting}>{greeting}</Text>
-        <Text style={styles.heroPitch}>{t('community.pitch')}</Text>
+    <View style={[styles.screen, { backgroundColor: palette.bg }]}>
+      <CourtPattern variant="community" />
+      <ScrollView
+        style={styles.root}
+        contentContainerStyle={[styles.content, { paddingTop: Math.max(insets.top + 8, 24) }]}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.accent2} />}
+      >
+        <LinearGradient colors={heroGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.hero, { borderColor: palette.lineStrong ?? palette.line }]}>
+          <Text style={[styles.heroTitle, { color: palette.text }]} numberOfLines={1}>{t('community.title')}</Text>
+          <Text style={[styles.heroGreeting, { color: palette.text }]}>{greeting}</Text>
+          <Text style={[styles.heroPitch, { color: palette.textSecondary }]}>{t('community.pitch')}</Text>
 
         <View style={styles.heroMetaRow}>
-          <Pressable style={styles.cityChip} onPress={() => setCityPickerOpen((v) => !v)}>
-            <Text style={styles.cityChipText}>{isLocating ? t('community.locating') : `📍 ${city}`}</Text>
+          <Pressable style={[styles.cityChip, { borderColor: palette.line, backgroundColor: palette.cardGlass ?? palette.bgAlt }]} onPress={() => setCityPickerOpen((v) => !v)}>
+            <Text style={[styles.cityChipText, { color: palette.text }]}>{isLocating ? t('community.locating') : `📍 ${city}`}</Text>
           </Pressable>
-          <Pressable style={styles.cityRefreshChip} onPress={detectCityFromLocation}>
-            <Text style={styles.cityRefreshChipText}>{t('community.auto')}</Text>
+          <Pressable style={[styles.cityRefreshChip, { borderColor: palette.line, backgroundColor: palette.bgElevated }]} onPress={detectCityFromLocation}>
+            <Text style={[styles.cityRefreshChipText, { color: palette.text }]}>{t('community.auto')}</Text>
           </Pressable>
         </View>
 
@@ -663,13 +681,17 @@ export function CommunityScreen() {
             {CITY_PRESETS.map((value) => (
               <Pressable
                 key={value}
-                style={[styles.cityPreset, value.toLowerCase() === city.toLowerCase() && styles.cityPresetActive]}
+                style={[
+                  styles.cityPreset,
+                  { borderColor: palette.line, backgroundColor: palette.bgAlt },
+                  value.toLowerCase() === city.toLowerCase() && [styles.cityPresetActive, { borderColor: palette.accent, backgroundColor: palette.accent }],
+                ]}
                 onPress={() => {
                   setCity(value);
                   setCityPickerOpen(false);
                 }}
               >
-                <Text style={[styles.cityPresetText, value.toLowerCase() === city.toLowerCase() && styles.cityPresetTextActive]}>{value}</Text>
+                <Text style={[styles.cityPresetText, { color: palette.textSecondary }, value.toLowerCase() === city.toLowerCase() && [styles.cityPresetTextActive, { color: palette.accentText }]]}>{value}</Text>
               </Pressable>
             ))}
           </View>
@@ -680,16 +702,20 @@ export function CommunityScreen() {
         {TOP_TABS.map((tab) => (
           <Pressable
             key={tab.key}
-            style={[styles.topTab, activeTab === tab.key && styles.topTabActive]}
+            style={[
+              styles.topTab,
+              { borderColor: palette.line, backgroundColor: palette.chip },
+              activeTab === tab.key && [styles.topTabActive, { borderColor: palette.accent, backgroundColor: palette.accent }],
+            ]}
             onPress={() => setActiveTab(tab.key)}
           >
-            <Text style={[styles.topTabText, activeTab === tab.key && styles.topTabTextActive]}>{t(tab.i18n)}</Text>
+            <Text style={[styles.topTabText, { color: palette.text }, activeTab === tab.key && [styles.topTabTextActive, { color: palette.accentText }]]}>{t(tab.i18n)}</Text>
           </Pressable>
         ))}
       </View>
 
-      {errorLabel ? <Text style={styles.error}>{errorLabel}</Text> : null}
-      {feedback ? <Text style={styles.feedback}>{feedback}</Text> : null}
+      {errorLabel ? <Text style={[styles.error, { color: palette.danger }]}>{errorLabel}</Text> : null}
+      {feedback ? <Text style={[styles.feedback, { color: palette.accent2 }]}>{feedback}</Text> : null}
 
       {activeTab === 'home' ? (
         <>
@@ -732,7 +758,7 @@ export function CommunityScreen() {
                     value={dmInput}
                     onChangeText={setDmInput}
                     placeholder={t('community.writePartner')}
-                    placeholderTextColor={theme.colors.muted}
+                    placeholderTextColor={palette.muted}
                   />
                   <Pressable style={styles.actionBtn} onPress={sendDM}>
                     <Text style={styles.actionBtnText}>{t('community.send')}</Text>
@@ -805,7 +831,7 @@ export function CommunityScreen() {
               value={homeInput}
               onChangeText={setHomeInput}
               placeholder={t('community.sharePlaceholder')}
-              placeholderTextColor={theme.colors.muted}
+              placeholderTextColor={palette.muted}
               multiline
             />
             <View style={styles.row}>
@@ -828,7 +854,7 @@ export function CommunityScreen() {
 
       {activeTab === 'regional' ? (
         <>
-          <LinearGradient colors={['#2C6958', '#1E4E44']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.banner}>
+          <LinearGradient colors={regionalGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.banner, { borderColor: palette.line }]}>
             <Text style={styles.bannerTitle}>{t('community.regionalBanner', { city })}</Text>
             <Text style={styles.bannerSub}>{t('community.regionalPitch')}</Text>
           </LinearGradient>
@@ -839,7 +865,7 @@ export function CommunityScreen() {
               value={regionalInput}
               onChangeText={setRegionalInput}
               placeholder={t('community.publishInCity', { city })}
-              placeholderTextColor={theme.colors.muted}
+              placeholderTextColor={palette.muted}
               multiline
             />
             <Pressable style={styles.actionBtn} onPress={() => sendChannelMessage(selectedRegionalChannel, regionalInput, setRegionalInput)}>
@@ -863,7 +889,7 @@ export function CommunityScreen() {
 
       {activeTab === 'channels' ? (
         <>
-          <LinearGradient colors={['#2A3E71', '#1B2F59']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.banner}>
+          <LinearGradient colors={channelsGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.banner, { borderColor: palette.line }]}>
             <Text style={styles.bannerTitle}>{t('community.channelsTitle')}</Text>
             <Text style={styles.bannerSub}>{t('community.channelsPitch')}</Text>
           </LinearGradient>
@@ -882,7 +908,7 @@ export function CommunityScreen() {
                   value={newChannelName}
                   onChangeText={setNewChannelName}
                   placeholder={t('community.newChannelPlaceholder')}
-                  placeholderTextColor={theme.colors.muted}
+                  placeholderTextColor={palette.muted}
                 />
                 <Pressable style={styles.secondaryBtn} onPress={createChannel}>
                   <Text style={styles.secondaryBtnText}>{t('community.create')}</Text>
@@ -894,7 +920,7 @@ export function CommunityScreen() {
                 value={channelInput}
                 onChangeText={setChannelInput}
                 placeholder={t('community.channelMessagePlaceholder')}
-                placeholderTextColor={theme.colors.muted}
+                placeholderTextColor={palette.muted}
                 multiline
               />
               <Pressable style={styles.actionBtn} onPress={() => sendChannelMessage(selectedChannel, channelInput, setChannelInput)}>
@@ -918,7 +944,7 @@ export function CommunityScreen() {
 
       {activeTab === 'clubs' ? (
         <>
-          <LinearGradient colors={['#6D3D28', '#492B1D']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.banner}>
+          <LinearGradient colors={clubsGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.banner, { borderColor: palette.line }]}>
             <Text style={styles.bannerTitle}>{t('community.clubsTitle')}</Text>
             <Text style={styles.bannerSub}>{t('community.clubsPitch')}</Text>
           </LinearGradient>
@@ -931,7 +957,7 @@ export function CommunityScreen() {
                 value={clubCode}
                 onChangeText={setClubCode}
                 placeholder={t('community.clubCode')}
-                placeholderTextColor={theme.colors.muted}
+                placeholderTextColor={palette.muted}
                 autoCapitalize="characters"
               />
               <Pressable style={styles.secondaryBtn} onPress={() => setClubQrOpen(true)}>
@@ -973,7 +999,7 @@ export function CommunityScreen() {
                 value={clubInput}
                 onChangeText={setClubInput}
                 placeholder={t('community.clubMessagePlaceholder')}
-                placeholderTextColor={theme.colors.muted}
+                placeholderTextColor={palette.muted}
                 multiline
               />
               <Pressable style={styles.actionBtn} onPress={() => sendChannelMessage(selectedClubChannel, clubInput, setClubInput)}>
@@ -1026,11 +1052,15 @@ export function CommunityScreen() {
         onScan={onScanClubQr}
         onClose={() => setClubQrOpen(false)}
       />
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+  },
   root: {
     flex: 1,
     backgroundColor: 'transparent',
@@ -1045,22 +1075,22 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     padding: 14,
     borderWidth: 1,
-    borderColor: 'rgba(157, 185, 203, 0.35)',
+    borderColor: theme.colors.line,
     gap: 8,
   },
   heroTitle: {
     color: theme.colors.text,
     fontFamily: theme.fonts.display,
-    fontSize: 36,
-    lineHeight: 38,
+    fontSize: 30,
+    lineHeight: 32,
   },
   heroGreeting: {
-    color: '#D9EEF9',
+    color: theme.colors.text,
     fontFamily: theme.fonts.title,
     fontSize: 15,
   },
   heroPitch: {
-    color: '#A8C4D6',
+    color: theme.colors.textSecondary,
     fontFamily: theme.fonts.body,
     fontSize: 12,
   },
@@ -1075,12 +1105,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(8, 19, 30, 0.72)',
+    backgroundColor: theme.colors.bgElevated,
     borderWidth: 1,
-    borderColor: '#3A6079',
+    borderColor: theme.colors.line,
   },
   cityChipText: {
-    color: '#E8F3FA',
+    color: theme.colors.text,
     fontFamily: theme.fonts.title,
     fontSize: 11,
     textTransform: 'uppercase',
@@ -1093,11 +1123,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#3A6079',
-    backgroundColor: 'rgba(8, 19, 30, 0.55)',
+    borderColor: theme.colors.line,
+    backgroundColor: theme.colors.bgAlt,
   },
   cityRefreshChipText: {
-    color: '#D3E9F7',
+    color: theme.colors.text,
     fontFamily: theme.fonts.title,
     fontSize: 11,
     textTransform: 'uppercase',
@@ -1114,20 +1144,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#3F6581',
-    backgroundColor: 'rgba(12, 36, 51, 0.8)',
+    borderColor: theme.colors.line,
+    backgroundColor: theme.colors.bgAlt,
   },
   cityPresetActive: {
     borderColor: theme.colors.accent,
     backgroundColor: theme.colors.accent,
   },
   cityPresetText: {
-    color: '#D7EAF6',
+    color: theme.colors.textSecondary,
     fontFamily: theme.fonts.title,
     fontSize: 11,
   },
   cityPresetTextActive: {
-    color: '#3A2500',
+    color: '#FFFFFF',
   },
   topTabs: {
     flexDirection: 'row',
@@ -1156,22 +1186,22 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
   },
   topTabTextActive: {
-    color: '#3A2500',
+    color: '#FFFFFF',
   },
   banner: {
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(157, 185, 203, 0.25)',
+    borderColor: theme.colors.line,
     padding: 12,
     gap: 4,
   },
   bannerTitle: {
-    color: '#F1F6FA',
+    color: '#F8FFFB',
     fontFamily: theme.fonts.title,
     fontSize: 16,
   },
   bannerSub: {
-    color: '#C9DDEA',
+    color: 'rgba(248, 255, 251, 0.86)',
     fontFamily: theme.fonts.body,
     fontSize: 12,
   },
@@ -1196,11 +1226,11 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     paddingHorizontal: 8,
     paddingVertical: 6,
-    backgroundColor: '#123349',
+    backgroundColor: theme.colors.bgElevated,
   },
   friendChipActive: {
-    borderColor: '#6A96AE',
-    backgroundColor: '#235068',
+    borderColor: theme.colors.accent2,
+    backgroundColor: `${theme.colors.accent2}22`,
   },
   friendChipText: {
     color: theme.colors.text,
@@ -1208,15 +1238,15 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   friendChipTextActive: {
-    color: '#E8F4FB',
+    color: theme.colors.text,
   },
   avatar: {
     width: 30,
     height: 30,
     borderRadius: 15,
     borderWidth: 1,
-    borderColor: '#4F7C97',
-    backgroundColor: '#1B4861',
+    borderColor: theme.colors.line,
+    backgroundColor: theme.colors.bgAlt,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1225,19 +1255,19 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.accent,
   },
   avatarText: {
-    color: '#E0F0FA',
+    color: theme.colors.textSecondary,
     fontFamily: theme.fonts.title,
     fontSize: 10,
   },
   avatarTextActive: {
-    color: '#3A2500',
+    color: '#FFFFFF',
   },
   dmBox: {
     borderWidth: 1,
-    borderColor: 'rgba(157, 185, 203, 0.28)',
+    borderColor: theme.colors.line,
     borderRadius: 12,
     minHeight: 120,
-    backgroundColor: 'rgba(7, 23, 34, 0.7)',
+    backgroundColor: theme.colors.bgAlt,
     padding: 10,
     gap: 8,
   },
@@ -1265,20 +1295,20 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   dmBubbleMine: {
-    backgroundColor: '#2A7A66',
+    backgroundColor: theme.colors.accent2,
     alignSelf: 'flex-end',
   },
   dmBubbleOther: {
-    backgroundColor: '#1E455C',
+    backgroundColor: '#355344',
     alignSelf: 'flex-start',
   },
   dmBubbleText: {
-    color: '#EAF6FD',
+    color: '#F8FFFB',
     fontFamily: theme.fonts.body,
     fontSize: 13,
   },
   dmTime: {
-    color: '#C6DCEA',
+    color: theme.colors.muted,
     fontFamily: theme.fonts.mono,
     fontSize: 10,
     alignSelf: 'flex-end',
@@ -1319,7 +1349,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
   },
   actionBtnText: {
-    color: '#3A2500',
+    color: '#FFFFFF',
     fontFamily: theme.fonts.title,
     textTransform: 'uppercase',
     fontSize: 11,
@@ -1348,7 +1378,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(157, 185, 203, 0.18)',
+    borderBottomColor: theme.colors.line,
     paddingVertical: 8,
     gap: 8,
   },
@@ -1371,7 +1401,7 @@ const styles = StyleSheet.create({
   addBtn: {
     minHeight: 32,
     borderRadius: 8,
-    backgroundColor: '#2E6F5E',
+    backgroundColor: theme.colors.accent2,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 10,
@@ -1379,13 +1409,13 @@ const styles = StyleSheet.create({
   proposeBtn: {
     minHeight: 32,
     borderRadius: 8,
-    backgroundColor: '#8A6A24',
+    backgroundColor: theme.colors.accent,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 10,
   },
   addBtnText: {
-    color: '#ECFFF9',
+    color: '#FFFFFF',
     fontFamily: theme.fonts.title,
     fontSize: 10,
     textTransform: 'uppercase',
@@ -1434,7 +1464,7 @@ const styles = StyleSheet.create({
   channelPill: {
     borderWidth: 1,
     borderColor: theme.colors.line,
-    backgroundColor: '#13344A',
+    backgroundColor: theme.colors.bgElevated,
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 7,
@@ -1444,14 +1474,14 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.accent,
   },
   channelPillText: {
-    color: '#D8EBF8',
+    color: theme.colors.textSecondary,
     fontFamily: theme.fonts.title,
     fontSize: 10,
     textTransform: 'uppercase',
     letterSpacing: 0.7,
   },
   channelPillTextActive: {
-    color: '#3A2500',
+    color: '#FFFFFF',
   },
   clubList: {
     marginTop: 8,
@@ -1463,7 +1493,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 7,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(157, 185, 203, 0.18)',
+    borderBottomColor: theme.colors.line,
   },
   clubName: {
     color: theme.colors.text,
@@ -1485,7 +1515,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(157, 185, 203, 0.17)',
+    borderBottomColor: theme.colors.line,
     paddingVertical: 7,
   },
   rankName: {

@@ -21,6 +21,7 @@ import { PirSparkline } from '../components/PirSparkline';
 import { RankBadge } from '../components/RankBadge';
 import { Skeleton } from '../components/Skeleton';
 import { StatPill } from '../components/StatPill';
+import { CourtPattern } from '../components/CourtPattern';
 import { AnimatedView, useCountUp, useStaggeredEntry } from '../hooks/usePadelyAnimations';
 import { useI18n } from '../state/i18n';
 import { useSession } from '../state/session';
@@ -68,6 +69,15 @@ function countStreakDays(matches) {
   return streak;
 }
 
+function isUnauthorizedErrorMessage(message) {
+  const raw = String(message ?? '').toLowerCase();
+  return raw.includes('authentication required')
+    || raw.includes('unauthorized')
+    || raw.includes('missing auth token')
+    || raw.includes('invalid token')
+    || raw.includes('session expiree');
+}
+
 export function HomeScreen() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
@@ -86,6 +96,7 @@ export function HomeScreen() {
   const [pointRule, setPointRule] = useState(user.settings?.pointRule ?? 'punto_de_oro');
   const [matchFormat, setMatchFormat] = useState(user.settings?.matchFormat ?? 'marathon');
   const [defaultMatchMode, setDefaultMatchMode] = useState(user.settings?.defaultMatchMode ?? 'ranked');
+  const [playerRhythm, setPlayerRhythm] = useState(user.settings?.playerRhythm ?? 'regular');
   const [autoSaveMatch, setAutoSaveMatch] = useState(Boolean(user.settings?.autoSaveMatch ?? true));
   const [notifPartner, setNotifPartner] = useState(Boolean(user.settings?.notifPartnerAvailable ?? true));
   const [notifMatch, setNotifMatch] = useState(Boolean(user.settings?.notifMatchInvite ?? true));
@@ -130,9 +141,14 @@ export function HomeScreen() {
       setRecentMatches(matchesOut);
       setSeasons(seasonsOut);
     } catch (e) {
-      setLoadError(e.message || 'Impossible de charger les donnees.');
+      const message = e.message || 'Impossible de charger les donnees.';
+      if (isUnauthorizedErrorMessage(message)) {
+        logout();
+        return;
+      }
+      setLoadError(message);
     }
-  }, [token, user.id, user.city]);
+  }, [token, user.id, user.city, logout]);
 
   useEffect(() => {
     loadHome().catch(() => {});
@@ -142,6 +158,7 @@ export function HomeScreen() {
     setPointRule(user.settings?.pointRule ?? 'punto_de_oro');
     setMatchFormat(user.settings?.matchFormat ?? 'marathon');
     setDefaultMatchMode(user.settings?.defaultMatchMode ?? 'ranked');
+    setPlayerRhythm(user.settings?.playerRhythm ?? 'regular');
     setAutoSaveMatch(Boolean(user.settings?.autoSaveMatch ?? true));
     setNotifPartner(Boolean(user.settings?.notifPartnerAvailable ?? true));
     setNotifMatch(Boolean(user.settings?.notifMatchInvite ?? true));
@@ -160,6 +177,52 @@ export function HomeScreen() {
 
   const winRate = useMemo(() => (matches ? Math.round((wins / matches) * 100) : 0), [wins, matches]);
   const streakDays = useMemo(() => countStreakDays(recentMatches), [recentMatches]);
+  const formScore = Number(dashboard?.form?.score ?? 0);
+  const playerProfileType = dashboard?.playerProfileType ?? 'regular';
+  const smartStreak = dashboard?.smartStreak ?? null;
+  const streakCount = Number(smartStreak?.count ?? streakDays);
+  const streakUnit = smartStreak?.unit ?? 'day';
+  const returnMode = dashboard?.returnMode ?? null;
+  const adaptiveObjective = dashboard?.adaptiveObjective ?? null;
+  const latestMatchInsight = dashboard?.latestMatchInsight ?? null;
+  const playerTypeLabel = t(`home.profileType_${playerProfileType}`);
+  const streakLabel = useMemo(() => {
+    if (streakUnit === 'month') return t('home.streakMonths');
+    if (streakUnit === 'week') return t('home.streakWeeks');
+    if (streakUnit === 'window') return t('home.streakWindows');
+    return t('home.streakDays');
+  }, [streakUnit, t]);
+  const objectiveLabel = useMemo(() => {
+    if (!adaptiveObjective) {
+      return t('home.objectiveFallback');
+    }
+    if (adaptiveObjective.mode === 'return') {
+      return t('home.objectiveReturn', {
+        count: adaptiveObjective.targetActivities,
+        days: adaptiveObjective.windowDays,
+      });
+    }
+    if (adaptiveObjective.mode === 'chase') {
+      return t('home.objectiveChase', {
+        count: adaptiveObjective.remainingActivities,
+        days: adaptiveObjective.windowDays,
+      });
+    }
+    return t('home.objectiveMaintain', {
+      count: adaptiveObjective.targetActivities,
+      days: adaptiveObjective.windowDays,
+    });
+  }, [adaptiveObjective, t]);
+  const momentLine = useMemo(() => {
+    if (!latestMatchInsight) {
+      return '';
+    }
+    const tags = (latestMatchInsight.momentTags ?? [])
+      .map((tag) => t(`home.moment_${tag}`))
+      .filter(Boolean)
+      .slice(0, 3);
+    return tags.join(' · ');
+  }, [latestMatchInsight, t]);
 
   const topRows = (cityLeaderboards?.month?.rows ?? []).slice(0, 3);
   const seasonProgress = Number(seasons?.current?.progress ?? 0);
@@ -179,10 +242,11 @@ export function HomeScreen() {
   const choiceActiveStyle = { backgroundColor: palette.accent, borderColor: palette.accent };
   const choiceActiveTextStyle = { color: palette.accentText };
   const heroEntry = useStaggeredEntry(0, !isLoading);
-  const actionsEntry = useStaggeredEntry(1, !isLoading);
-  const boardEntry = useStaggeredEntry(2, !isLoading);
-  const seasonEntry = useStaggeredEntry(3, !isLoading);
-  const logoutEntry = useStaggeredEntry(4, !isLoading);
+  const objectiveEntry = useStaggeredEntry(1, !isLoading);
+  const actionsEntry = useStaggeredEntry(2, !isLoading);
+  const boardEntry = useStaggeredEntry(3, !isLoading);
+  const seasonEntry = useStaggeredEntry(4, !isLoading);
+  const logoutEntry = useStaggeredEntry(5, !isLoading);
 
   async function onRefresh() {
     setRefreshing(true);
@@ -201,6 +265,7 @@ export function HomeScreen() {
           pointRule,
           matchFormat,
           defaultMatchMode,
+          playerRhythm,
           autoSaveMatch,
           notifPartnerAvailable: notifPartner,
           notifMatchInvite: notifMatch,
@@ -219,6 +284,7 @@ export function HomeScreen() {
         notifPartnerAvailable: notifPartner,
         notifMatchInvite: notifMatch,
         notifLeaderboard,
+        playerRhythm,
         language: languageChoice,
       });
       if (notifState.enabled) {
@@ -235,152 +301,188 @@ export function HomeScreen() {
 
   return (
     <>
-      <ScrollView
-        style={styles.root}
-        contentContainerStyle={[styles.content, { paddingTop: Math.max(insets.top + 8, 24) }]}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.accent2} />}
-      >
-        <View style={styles.headerRow}>
-          <Text numberOfLines={1} style={[styles.h1, { color: palette.text }]}>{t('home.hello', { name: user.displayName })}</Text>
-          <Pressable style={[styles.gearBtn, { backgroundColor: palette.cardStrong, borderColor: palette.line }]} onPress={() => setSettingsOpen(true)}>
-            <Svg width={20} height={20} viewBox="0 0 24 24">
-              <Path
-                d="M11.05 2.93c.46-.83 1.64-.83 2.1 0l.63 1.15c.2.37.63.54 1.03.43l1.26-.35c.91-.25 1.75.59 1.5 1.5l-.35 1.26c-.11.4.06.83.43 1.03l1.15.63c.83.46.83 1.64 0 2.1l-1.15.63c-.37.2-.54.63-.43 1.03l.35 1.26c.25.91-.59 1.75-1.5 1.5l-1.26-.35c-.4-.11-.83.06-1.03.43l-.63 1.15c-.46.83-1.64.83-2.1 0l-.63-1.15c-.2-.37-.63-.54-1.03-.43l-1.26.35c-.91.25-1.75-.59-1.5-1.5l.35-1.26c.11-.4-.06-.83-.43-1.03l-1.15-.63c-.83-.46-.83-1.64 0-2.1l1.15-.63c.37-.2.54-.63.43-1.03l-.35-1.26c-.25-.91.59-1.75 1.5-1.5l1.26.35c.4.11.83-.06 1.03-.43l.63-1.15z"
-                stroke={palette.text}
-                strokeWidth={1.4}
-                fill="none"
-              />
-              <Circle cx="12" cy="12" r="3.1" stroke={palette.text} strokeWidth={1.4} fill="none" />
-            </Svg>
-          </Pressable>
-        </View>
-
-        {isLoading && !loadError ? (
-          <>
-            <Card elevated style={styles.heroCard}>
-              <Skeleton width={120} height={12} />
-              <Skeleton width="100%" height={180} radius={16} />
-              <Skeleton width="100%" height={42} radius={14} />
-            </Card>
-            <Card elevated>
-              <Skeleton width={180} height={12} />
-              <View style={styles.quickRow}>
-                <Skeleton width="49%" height={52} radius={14} />
-                <Skeleton width="49%" height={52} radius={14} />
-              </View>
-            </Card>
-            <Card>
-              <Skeleton width={180} height={12} />
-              <View style={styles.boardRows}>
-                <Skeleton width="100%" height={44} />
-                <Skeleton width="100%" height={44} />
-                <Skeleton width="100%" height={44} />
-              </View>
-            </Card>
-            <Card elevated>
-              <Skeleton width={200} height={12} />
-              <Skeleton width="100%" height={12} style={{ marginTop: 10 }} />
-              <Skeleton width={130} height={10} style={{ marginTop: 8 }} />
-            </Card>
-          </>
-        ) : loadError ? (
-          <Card elevated>
-            <Text style={[styles.sectionTitle, { color: palette.text }]}>Connexion API</Text>
-            <Text style={[styles.empty, { color: palette.warning }]}>{loadError}</Text>
-            <Pressable style={[styles.quickBtnPrimary, { backgroundColor: palette.accent, marginTop: 10 }]} onPress={onRefresh}>
-              <Text style={styles.quickBtnPrimaryText}>Reessayer</Text>
+      <View style={[styles.screen, { backgroundColor: palette.bg }]}>
+        <CourtPattern variant="home" />
+        <ScrollView
+          style={styles.root}
+          contentContainerStyle={[styles.content, { paddingTop: Math.max(insets.top + 8, 24) }]}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.accent2} />}
+        >
+          <View style={styles.headerRow}>
+            <View style={styles.headerBody}>
+              <Text numberOfLines={1} style={[styles.h1, { color: palette.text }]}>{t('home.hello', { name: user.displayName })}</Text>
+              <Text style={[styles.headerSub, { color: palette.textSecondary }]}>{t('home.subtitle')}</Text>
+            </View>
+            <Pressable style={[styles.gearBtn, { backgroundColor: palette.cardStrong, borderColor: palette.line }]} onPress={() => setSettingsOpen(true)}>
+              <Svg width={20} height={20} viewBox="0 0 24 24">
+                <Path
+                  d="M11.05 2.93c.46-.83 1.64-.83 2.1 0l.63 1.15c.2.37.63.54 1.03.43l1.26-.35c.91-.25 1.75.59 1.5 1.5l-.35 1.26c-.11.4.06.83.43 1.03l1.15.63c.83.46.83 1.64 0 2.1l-1.15.63c-.37.2-.54.63-.43 1.03l.35 1.26c.25.91-.59 1.75-1.5 1.5l-1.26-.35c-.4-.11-.83.06-1.03.43l-.63 1.15c-.46.83-1.64.83-2.1 0l-.63-1.15c-.2-.37-.63-.54-1.03-.43l-1.26.35c-.91.25-1.75-.59-1.5-1.5l.35-1.26c.11-.4-.06-.83-.43-1.03l-1.15-.63c-.83-.46-.83-1.64 0-2.1l1.15-.63c.37-.2.54-.63.43-1.03l-.35-1.26c-.25-.91.59-1.75 1.5-1.5l1.26.35c.4.11.83-.06 1.03-.43l.63-1.15z"
+                  stroke={palette.text}
+                  strokeWidth={1.4}
+                  fill="none"
+                />
+                <Circle cx="12" cy="12" r="3.1" stroke={palette.text} strokeWidth={1.4} fill="none" />
+              </Svg>
             </Pressable>
-          </Card>
-        ) : (
-          <>
-            <AnimatedView style={heroEntry}>
+          </View>
+
+          {isLoading && !loadError ? (
+            <>
               <Card elevated style={styles.heroCard}>
-                <View style={styles.heroHead}>
-                  <Text style={[styles.eyebrow, { color: palette.accent2 }]}>{t('home.pirLive')}</Text>
-                  <RankBadge rank={rankFromRating(rating)} />
-                </View>
-                <Text style={[styles.heroMetric, { color: palette.text }]}>{`PIR ${pirLive} · ${t('home.heroRank', { rank: rankFromRating(rating), rating: ratingLive })}`}</Text>
-                <PirGauge pir={pir} delta={lastDelta} rank={rankFromRating(rating)} size={160} strokeWidth={8} />
-                <PirSparkline data={pirHistory} />
-                <View style={styles.pillsRow}>
-                  <StatPill value={wins} label={t('home.wins')} />
-                  <StatPill value={`${winRate}%`} label={t('home.winRate')} highlight />
-                  <StatPill value={`🔥 ${streakDays}`} label={t('home.streak')} />
-                </View>
+                <Skeleton width={120} height={12} />
+                <Skeleton width="100%" height={180} radius={16} />
+                <Skeleton width="100%" height={42} radius={14} />
               </Card>
-            </AnimatedView>
-
-            <AnimatedView style={actionsEntry}>
               <Card elevated>
-                <Text style={[styles.sectionTitle, { color: palette.text }]}>{t('home.launchTitle')}</Text>
+                <Skeleton width={180} height={12} />
                 <View style={styles.quickRow}>
-                  <Pressable style={[styles.quickBtnPrimary, { backgroundColor: palette.accent }]} onPress={goPlaySetup}>
-                    <Text style={[styles.quickBtnPrimaryText, { color: palette.accentText }]}>{t('home.launchRanked')}</Text>
-                  </Pressable>
-                  <Pressable style={[styles.quickBtnGhost, { borderColor: palette.line, backgroundColor: palette.chip }]} onPress={goCommunity}>
-                    <Text style={[styles.quickBtnGhostText, { color: palette.text }]}>{t('home.launchFind')}</Text>
-                  </Pressable>
+                  <Skeleton width="49%" height={52} radius={14} />
+                  <Skeleton width="49%" height={52} radius={14} />
                 </View>
               </Card>
-            </AnimatedView>
-
-            <AnimatedView style={boardEntry}>
               <Card>
-                <View style={styles.boardHead}>
-                  <Text style={[styles.sectionTitle, { color: palette.text }]}>{t('home.cityTop3', { city: user.city ?? 'Lyon' })}</Text>
-                  <Text style={[styles.boardMeta, { color: palette.textSecondary ?? palette.muted }]}>{t('home.monthRank')}</Text>
-                </View>
+                <Skeleton width={180} height={12} />
                 <View style={styles.boardRows}>
-                  {topRows.map((row) => (
-                    <LeaderboardRow
-                      key={row.userId}
-                      row={row}
-                      podium
-                      onPress={openPlayerProfile}
-                      isCurrentUser={row.userId === user.id}
-                      currentUserLabel={t('home.you')}
-                    />
-                  ))}
-                  {topRows.length === 0 ? (
-                    <EmptyState title={t('home.emptyBoardTitle')} body={t('home.emptyBoardBody')} compact />
-                  ) : null}
+                  <Skeleton width="100%" height={44} />
+                  <Skeleton width="100%" height={44} />
+                  <Skeleton width="100%" height={44} />
                 </View>
               </Card>
-            </AnimatedView>
-
-            <AnimatedView style={seasonEntry}>
               <Card elevated>
-                <View style={styles.seasonHead}>
-                  <Text style={[styles.sectionTitle, { color: palette.text }]}>{t('home.seasonTitle', { label: seasonLabel })}</Text>
-                  <Text style={[styles.seasonRank, { color: palette.accent }]}>
-                    {seasonRank ? t('home.seasonRank', { rank: seasonRank }) : t('home.seasonUnranked')}
-                  </Text>
-                </View>
-                <View style={[styles.seasonBarTrack, { backgroundColor: palette.bgAlt, borderColor: palette.line }]}>
-                  <View style={[styles.seasonBarFill, { width: `${Math.max(3, Math.min(100, seasonProgress * 100))}%`, backgroundColor: palette.accent }]} />
-                </View>
-                <Text style={[styles.seasonMeta, { color: palette.textSecondary ?? palette.muted }]}>
-                  {t('home.seasonDaysLeft', { days: seasonDaysRemaining })}
-                </Text>
-                {lastSeasonBadge ? (
-                  <Text style={[styles.seasonBadge, { color: palette.accent2 }]}>
-                    {t('home.lastSeasonBadge', { badge: lastSeasonBadge })}
-                  </Text>
-                ) : null}
+                <Skeleton width={200} height={12} />
+                <Skeleton width="100%" height={12} style={{ marginTop: 10 }} />
+                <Skeleton width={130} height={10} style={{ marginTop: 8 }} />
               </Card>
-            </AnimatedView>
-
-            <AnimatedView style={logoutEntry}>
-              <Pressable style={[styles.logout, { backgroundColor: palette.cardStrong, borderColor: palette.line }]} onPress={logout}>
-                <Text style={[styles.logoutLabel, { color: palette.text }]}>{t('home.logout')}</Text>
+            </>
+          ) : loadError ? (
+            <Card elevated>
+              <Text style={[styles.sectionTitle, { color: palette.text }]}>Connexion API</Text>
+              <Text style={[styles.empty, { color: palette.warning }]}>{loadError}</Text>
+              <Pressable style={[styles.quickBtnPrimary, { backgroundColor: palette.accent, marginTop: 10 }]} onPress={onRefresh}>
+                <Text style={[styles.quickBtnPrimaryText, { color: palette.accentText }]}>{t('home.retry')}</Text>
               </Pressable>
-            </AnimatedView>
-          </>
-        )}
-      </ScrollView>
+            </Card>
+          ) : (
+            <>
+              <AnimatedView style={heroEntry}>
+                <Card elevated style={styles.heroCard}>
+                  <View style={styles.heroHead}>
+                    <Text style={[styles.eyebrow, { color: palette.accent2 }]}>{t('home.pirLive')}</Text>
+                    <RankBadge rank={rankFromRating(rating)} />
+                  </View>
+                  <Text style={[styles.heroMetric, { color: palette.text }]}>{`PIR ${pirLive} · ${t('home.heroRank', { rank: rankFromRating(rating), rating: ratingLive })}`}</Text>
+                  <Text style={[styles.heroMeta, { color: palette.textSecondary }]}>
+                    {t('home.formLine', { form: formScore, profile: playerTypeLabel })}
+                  </Text>
+                  <PirGauge pir={pir} delta={lastDelta} rank={rankFromRating(rating)} size={160} strokeWidth={8} />
+                  <PirSparkline data={pirHistory} />
+                  <View style={styles.pillsRow}>
+                    <StatPill value={wins} label={t('home.wins')} />
+                    <StatPill value={`${winRate}%`} label={t('home.winRate')} highlight />
+                    <StatPill value={streakCount} label={streakLabel} />
+                  </View>
+                </Card>
+              </AnimatedView>
+
+              <AnimatedView style={objectiveEntry}>
+                <Card elevated>
+                  <Text style={[styles.sectionTitle, { color: palette.text }]}>{t('home.objectiveTitle')}</Text>
+                  <Text style={[styles.boardMeta, { color: palette.textSecondary }]}>{objectiveLabel}</Text>
+                  {returnMode?.active ? (
+                    <Text style={[styles.objectiveMeta, { color: palette.accent2 }]}>
+                      {t('home.returnModeLine', { days: returnMode.pauseDays, bonus: returnMode.bonusForm })}
+                    </Text>
+                  ) : null}
+                  {latestMatchInsight ? (
+                    <>
+                      <Text style={[styles.objectiveMeta, { color: palette.textSecondary }]}>
+                        {t('home.latestMatchLine', {
+                          score: latestMatchInsight.score,
+                          importance: t(`home.importance_${latestMatchInsight.importanceLabel}`),
+                        })}
+                      </Text>
+                      {momentLine ? (
+                        <Text style={[styles.objectiveMeta, { color: palette.accent }]}>
+                          {momentLine}
+                        </Text>
+                      ) : null}
+                    </>
+                  ) : null}
+                </Card>
+              </AnimatedView>
+
+              <AnimatedView style={actionsEntry}>
+                <Card elevated>
+                  <Text style={[styles.sectionTitle, { color: palette.text }]}>{t('home.launchTitle')}</Text>
+                  <View style={styles.quickRow}>
+                    <Pressable style={[styles.quickBtnPrimary, { backgroundColor: palette.accent }]} onPress={goPlaySetup}>
+                      <Text style={[styles.quickBtnPrimaryText, { color: palette.accentText }]}>{t('home.launchRanked')}</Text>
+                    </Pressable>
+                    <Pressable style={[styles.quickBtnGhost, { borderColor: palette.line, backgroundColor: palette.chip }]} onPress={goCommunity}>
+                      <Text style={[styles.quickBtnGhostText, { color: palette.text }]}>{t('home.launchFind')}</Text>
+                    </Pressable>
+                  </View>
+                </Card>
+              </AnimatedView>
+
+              <AnimatedView style={boardEntry}>
+                <Card>
+                  <View style={styles.boardHead}>
+                    <Text style={[styles.sectionTitle, { color: palette.text }]}>{t('home.cityTop3', { city: user.city ?? 'Lyon' })}</Text>
+                    <Text style={[styles.boardMeta, { color: palette.textSecondary ?? palette.muted }]}>{t('home.monthRank')}</Text>
+                  </View>
+                  <View style={styles.boardRows}>
+                    {topRows.map((row) => (
+                      <LeaderboardRow
+                        key={row.userId}
+                        row={row}
+                        podium
+                        onPress={openPlayerProfile}
+                        isCurrentUser={row.userId === user.id}
+                        currentUserLabel={t('home.you')}
+                      />
+                    ))}
+                    {topRows.length === 0 ? (
+                      <EmptyState title={t('home.emptyBoardTitle')} body={t('home.emptyBoardBody')} compact />
+                    ) : null}
+                  </View>
+                </Card>
+              </AnimatedView>
+
+              <AnimatedView style={seasonEntry}>
+                <Card elevated>
+                  <View style={styles.seasonHead}>
+                    <Text style={[styles.sectionTitle, { color: palette.text }]}>{t('home.seasonTitle', { label: seasonLabel })}</Text>
+                    <Text style={[styles.seasonRank, { color: palette.accent }]}>
+                      {seasonRank ? t('home.seasonRank', { rank: seasonRank }) : t('home.seasonUnranked')}
+                    </Text>
+                  </View>
+                  <View style={[styles.seasonBarTrack, { backgroundColor: palette.bgAlt, borderColor: palette.line }]}>
+                    <View style={[styles.seasonBarFill, { width: `${Math.max(3, Math.min(100, seasonProgress * 100))}%`, backgroundColor: palette.accent }]} />
+                  </View>
+                  <Text style={[styles.seasonMeta, { color: palette.textSecondary ?? palette.muted }]}>
+                    {t('home.seasonDaysLeft', { days: seasonDaysRemaining })}
+                  </Text>
+                  {lastSeasonBadge ? (
+                    <Text style={[styles.seasonBadge, { color: palette.accent2 }]}>
+                      {t('home.lastSeasonBadge', { badge: lastSeasonBadge })}
+                    </Text>
+                  ) : null}
+                </Card>
+              </AnimatedView>
+
+              <AnimatedView style={logoutEntry}>
+                <Pressable style={[styles.logout, { backgroundColor: palette.cardStrong, borderColor: palette.line }]} onPress={logout}>
+                  <Text style={[styles.logoutLabel, { color: palette.text }]}>{t('home.logout')}</Text>
+                </Pressable>
+              </AnimatedView>
+            </>
+          )}
+        </ScrollView>
+      </View>
 
       <Modal visible={settingsOpen} transparent animationType="fade" onRequestClose={() => setSettingsOpen(false)}>
-        <View style={styles.modalBackdrop}>
+        <View style={[styles.modalBackdrop, { backgroundColor: palette.cardGlass ?? 'rgba(4, 8, 14, 0.72)' }]}>
           <View style={[styles.modalCard, { backgroundColor: palette.card, borderColor: palette.line }]}>
             <Text style={[styles.modalTitle, { color: palette.text }]}>{t('home.settingsTitle')}</Text>
 
@@ -431,6 +533,23 @@ export function HomeScreen() {
               >
                 <Text style={[styles.choiceText, { color: palette.text }, defaultMatchMode === 'friendly' && choiceActiveTextStyle]}>{t('home.friendly')}</Text>
               </Pressable>
+            </View>
+
+            <Text style={[styles.modalLabel, { color: palette.muted }]}>{t('home.playerRhythm')}</Text>
+            <View style={styles.choiceWrap}>
+              {[
+                { key: 'light', label: t('home.rhythmLight') },
+                { key: 'regular', label: t('home.rhythmRegular') },
+                { key: 'intense', label: t('home.rhythmIntense') },
+              ].map((item) => (
+                <Pressable
+                  key={item.key}
+                  style={[styles.choiceBtnWide, { borderColor: palette.line, backgroundColor: palette.chip }, playerRhythm === item.key && choiceActiveStyle]}
+                  onPress={() => setPlayerRhythm(item.key)}
+                >
+                  <Text style={[styles.choiceText, { color: palette.text }, playerRhythm === item.key && choiceActiveTextStyle]}>{item.label}</Text>
+                </Pressable>
+              ))}
             </View>
 
             <Text style={[styles.modalLabel, { color: palette.muted }]}>{t('home.appearance')}</Text>
@@ -512,10 +631,15 @@ export function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+  },
   root: { flex: 1, backgroundColor: 'transparent' },
   content: { padding: 16, gap: 12, paddingBottom: 26 },
   headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  h1: { fontFamily: theme.fonts.display, fontSize: 38, lineHeight: 40 },
+  headerBody: { flex: 1, paddingRight: 10 },
+  h1: { fontFamily: theme.fonts.display, fontSize: 30, lineHeight: 32 },
+  headerSub: { marginTop: 4, fontFamily: theme.fonts.body, fontSize: 12 },
   eyebrow: { fontFamily: theme.fonts.mono, fontSize: 11, letterSpacing: 1 },
   gearBtn: {
     width: 42,
@@ -532,6 +656,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   heroMetric: { fontFamily: theme.fonts.body, fontSize: 12 },
+  heroMeta: { fontFamily: theme.fonts.body, fontSize: 12 },
+  objectiveMeta: { marginTop: 6, fontFamily: theme.fonts.body, fontSize: 12 },
   pillsRow: { flexDirection: 'row', gap: 8, marginTop: 2 },
   quickRow: { flexDirection: 'row', gap: 8, marginTop: 6 },
   quickBtnPrimary: {
@@ -542,7 +668,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   quickBtnPrimaryText: {
-    color: '#3A2500',
     fontFamily: theme.fonts.title,
     textTransform: 'uppercase',
     letterSpacing: 0.7,
@@ -565,6 +690,7 @@ const styles = StyleSheet.create({
   sectionTitle: { fontFamily: theme.fonts.title, fontSize: 16 },
   boardHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   boardMeta: { fontFamily: theme.fonts.body, fontSize: 12 },
+  empty: { marginTop: 6, fontFamily: theme.fonts.body, fontSize: 14, lineHeight: 20 },
   seasonHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   seasonRank: { fontFamily: theme.fonts.title, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.6 },
   seasonBarTrack: {

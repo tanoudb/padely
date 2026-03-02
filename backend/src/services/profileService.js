@@ -1,6 +1,16 @@
 import { store } from '../store/index.js';
 import { upsertUserPushToken } from './pushService.js';
 
+const PLAYER_RHYTHMS = new Set(['light', 'regular', 'intense']);
+
+function normalizePlayerRhythm(value, fallback = 'regular') {
+  const raw = String(value ?? '').toLowerCase();
+  if (PLAYER_RHYTHMS.has(raw)) {
+    return raw;
+  }
+  return fallback;
+}
+
 function ratingFromLevel(level) {
   if (level <= 2) return 800;
   if (level <= 4) return 1200;
@@ -49,9 +59,17 @@ export async function updateUserSettings(userId, payload) {
     throw new Error('User not found');
   }
 
+  const incomingSettings = {
+    ...(payload.settings ?? {}),
+  };
+
   const settings = {
     ...user.settings,
-    ...(payload.settings ?? {}),
+    ...incomingSettings,
+    playerRhythm: normalizePlayerRhythm(
+      incomingSettings.playerRhythm ?? user.settings?.playerRhythm ?? 'regular',
+      user.settings?.playerRhythm ?? 'regular',
+    ),
   };
   const privacy = {
     ...user.privacy,
@@ -89,6 +107,10 @@ export async function completeOnboarding(userId, payload) {
     defaultMatchMode: preferences.defaultMatchMode ?? user.settings?.defaultMatchMode ?? 'ranked',
     matchFormat: preferences.matchFormat ?? user.settings?.matchFormat ?? 'marathon',
     pointRule: preferences.pointRule ?? user.settings?.pointRule ?? 'punto_de_oro',
+    playerRhythm: normalizePlayerRhythm(
+      preferences.playerRhythm ?? user.settings?.playerRhythm ?? 'regular',
+      user.settings?.playerRhythm ?? 'regular',
+    ),
     autoSaveMatch: preferences.autoSaveMatch ?? user.settings?.autoSaveMatch ?? true,
     notificationPreferences: {
       ...(user.settings?.notificationPreferences ?? {}),
@@ -122,6 +144,7 @@ export async function completeOnboarding(userId, payload) {
         defaultMatchMode: nextSettings.defaultMatchMode,
         matchFormat: nextSettings.matchFormat,
         pointRule: nextSettings.pointRule,
+        playerRhythm: nextSettings.playerRhythm,
         autoSaveMatch: nextSettings.autoSaveMatch,
         notifications: nextSettings.notificationPreferences,
       },

@@ -60,6 +60,7 @@ export function OnboardingScreen() {
   const [defaultMatchMode, setDefaultMatchMode] = useState('ranked');
   const [matchFormat, setMatchFormat] = useState('marathon');
   const [pointRule, setPointRule] = useState('punto_de_oro');
+  const [playerRhythm, setPlayerRhythm] = useState(user?.settings?.playerRhythm ?? 'regular');
   const [autoSaveMatch, setAutoSaveMatch] = useState(true);
   const [notifMatchInvites, setNotifMatchInvites] = useState(true);
   const [notifLeaderboard, setNotifLeaderboard] = useState(true);
@@ -118,6 +119,7 @@ export function OnboardingScreen() {
           defaultMatchMode,
           matchFormat,
           pointRule,
+          playerRhythm,
           autoSaveMatch,
           notifications: {
             matchInvites: notifMatchInvites,
@@ -322,6 +324,32 @@ export function OnboardingScreen() {
                         },
                       ]}
                       onPress={() => setPointRule(entry.key)}
+                    >
+                      <Text style={[styles.prefChipText, { color: active ? palette.accent : palette.textSecondary }]}>{entry.label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              <Text style={[styles.prefLabel, { color: palette.textSecondary }]}>{t('onboarding.playerRhythm')}</Text>
+              <View style={styles.prefRow}>
+                {[
+                  { key: 'light', label: t('onboarding.rhythmLight') },
+                  { key: 'regular', label: t('onboarding.rhythmRegular') },
+                  { key: 'intense', label: t('onboarding.rhythmIntense') },
+                ].map((entry) => {
+                  const active = entry.key === playerRhythm;
+                  return (
+                    <Pressable
+                      key={entry.key}
+                      style={[
+                        styles.prefChip,
+                        {
+                          borderColor: active ? palette.accent : palette.line,
+                          backgroundColor: active ? palette.accentMuted : palette.bgAlt,
+                        },
+                      ]}
+                      onPress={() => setPlayerRhythm(entry.key)}
                     >
                       <Text style={[styles.prefChipText, { color: active ? palette.accent : palette.textSecondary }]}>{entry.label}</Text>
                     </Pressable>
