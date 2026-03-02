@@ -11,7 +11,7 @@ export function StatPill({ value, label, highlight = false }) {
         styles.pill,
         {
           backgroundColor: highlight ? palette.cardStrong : palette.card,
-          borderColor: palette.line,
+          shadowColor: palette.shadow,
         },
       ]}
     >
@@ -24,13 +24,16 @@ export function StatPill({ value, label, highlight = false }) {
 const styles = StyleSheet.create({
   pill: {
     flex: 1,
-    borderWidth: 1,
     borderRadius: 16,
     minHeight: 76,
     paddingHorizontal: 10,
     paddingVertical: 8,
     justifyContent: 'center',
     alignItems: 'center',
+    shadowOpacity: 0.16,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
   },
   value: {
     fontFamily: theme.fonts.title,

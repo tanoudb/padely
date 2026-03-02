@@ -253,3 +253,17 @@ Validation: backend tests `34/34` (`npm test`), bundles Expo iOS et Android expo
 ✅
 ### Prochaine mission recommandée
 PARTAGE SOCIAL (image résultat premium + share sheet natif), dès que la dépendance capture image est installable
+
+## [2026-03-02] — Run #16
+### Mission
+REFONTE HOME COCKPIT
+### Résultat
+Le cockpit Home est maintenant centré sur la performance immédiate: jauge PIR compacte premium (160x160), actions rapides Play/Find en tête, top 3 local plus lisible et vrai highlight du joueur courant.
+La vue est plus exclusive et moins chargée: suppression de la carte motivation, entrée animée staggered conservée, et bouton réglages remplacé par une icône SVG cohérente avec l’univers produit.
+### Technique
+Mobile: refonte de `mobile/src/screens/HomeScreen.js` (header, hero, quick actions, section Top 3, suppression motivation card, styles), upgrade `mobile/src/components/PirGauge.js` (props `size`/`strokeWidth`, gradient dynamique palette), amélioration `mobile/src/components/LeaderboardRow.js` (highlight `isCurrentUser` + badge “You”), et `mobile/src/components/StatPill.js` (cards sans border, shadow). i18n FR/EN mis à jour dans `mobile/src/i18n/dictionaries.js` (`home.cityTop3`, `home.you`).
+Validation: backend tests `34/34` et exports Expo iOS/Android réussis (`npx expo export --platform ios|android`).
+### Statut
+✅
+### Prochaine mission recommandée
+PARTAGE SOCIAL (image de résultat premium + share sheet natif), dès que `react-native-view-shot` est installable

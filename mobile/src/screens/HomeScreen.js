@@ -10,7 +10,7 @@ import {
   View,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { LinearGradient } from 'expo-linear-gradient';
+import Svg, { Circle, Path } from 'react-native-svg';
 import { api } from '../api/client';
 import { Card } from '../components/Card';
 import { EmptyState } from '../components/EmptyState';
@@ -148,18 +148,10 @@ export function HomeScreen() {
   const rating = dashboard?.rating ?? user.rating ?? 1200;
   const pir = dashboard?.pir ?? user.pir ?? 50;
   const wins = dashboard?.wins ?? 0;
-  const losses = dashboard?.losses ?? 0;
   const matches = dashboard?.matches ?? 0;
 
   const winRate = useMemo(() => (matches ? Math.round((wins / matches) * 100) : 0), [wins, matches]);
   const streakDays = useMemo(() => countStreakDays(recentMatches), [recentMatches]);
-
-  const motivationalMessage = useMemo(() => {
-    if (matches < 3) return t('home.motivationStart');
-    if (winRate >= 70) return t('home.motivationHot');
-    if (winRate >= 50) return t('home.motivationSteady');
-    return t('home.motivationRecovery');
-  }, [matches, winRate, t]);
 
   const topRows = (cityLeaderboards?.month?.rows ?? []).slice(0, 3);
   const seasonProgress = Number(seasons?.current?.progress ?? 0);
@@ -182,8 +174,7 @@ export function HomeScreen() {
   const actionsEntry = useStaggeredEntry(1, !isLoading);
   const boardEntry = useStaggeredEntry(2, !isLoading);
   const seasonEntry = useStaggeredEntry(3, !isLoading);
-  const focusEntry = useStaggeredEntry(4, !isLoading);
-  const logoutEntry = useStaggeredEntry(5, !isLoading);
+  const logoutEntry = useStaggeredEntry(4, !isLoading);
 
   async function onRefresh() {
     setRefreshing(true);
@@ -244,7 +235,15 @@ export function HomeScreen() {
         <View style={styles.headerRow}>
           <Text style={[styles.h1, { color: palette.text }]}>{t('home.hello', { name: user.displayName })}</Text>
           <Pressable style={[styles.gearBtn, { backgroundColor: palette.cardStrong, borderColor: palette.line }]} onPress={() => setSettingsOpen(true)}>
-            <Text style={[styles.gearText, { color: palette.text }]}>⚙</Text>
+            <Svg width={20} height={20} viewBox="0 0 24 24">
+              <Path
+                d="M11.05 2.93c.46-.83 1.64-.83 2.1 0l.63 1.15c.2.37.63.54 1.03.43l1.26-.35c.91-.25 1.75.59 1.5 1.5l-.35 1.26c-.11.4.06.83.43 1.03l1.15.63c.83.46.83 1.64 0 2.1l-1.15.63c-.37.2-.54.63-.43 1.03l.35 1.26c.25.91-.59 1.75-1.5 1.5l-1.26-.35c-.4-.11-.83.06-1.03.43l-.63 1.15c-.46.83-1.64.83-2.1 0l-.63-1.15c-.2-.37-.63-.54-1.03-.43l-1.26.35c-.91.25-1.75-.59-1.5-1.5l.35-1.26c.11-.4-.06-.83-.43-1.03l-1.15-.63c-.83-.46-.83-1.64 0-2.1l1.15-.63c.37-.2.54-.63.43-1.03l-.35-1.26c-.25-.91.59-1.75 1.5-1.5l1.26.35c.4.11.83-.06 1.03-.43l.63-1.15z"
+                stroke={palette.text}
+                strokeWidth={1.4}
+                fill="none"
+              />
+              <Circle cx="12" cy="12" r="3.1" stroke={palette.text} strokeWidth={1.4} fill="none" />
+            </Svg>
           </Pressable>
         </View>
 
@@ -285,7 +284,7 @@ export function HomeScreen() {
                   <RankBadge rank={rankFromRating(rating)} />
                 </View>
                 <Text style={[styles.heroMetric, { color: palette.text }]}>{`PIR ${pirLive} · ${t('home.heroRank', { rank: rankFromRating(rating), rating: ratingLive })}`}</Text>
-                <PirGauge pir={pir} delta={lastDelta} rank={rankFromRating(rating)} />
+                <PirGauge pir={pir} delta={lastDelta} rank={rankFromRating(rating)} size={160} strokeWidth={8} />
                 <PirSparkline data={pirHistory} />
                 <View style={styles.pillsRow}>
                   <StatPill value={wins} label={t('home.wins')} />
@@ -311,10 +310,20 @@ export function HomeScreen() {
 
             <AnimatedView style={boardEntry}>
               <Card>
-                <Text style={[styles.sectionTitle, { color: palette.text }]}>{t('home.cityRanking', { city: user.city ?? 'Lyon' })}</Text>
+                <View style={styles.boardHead}>
+                  <Text style={[styles.sectionTitle, { color: palette.text }]}>{t('home.cityTop3', { city: user.city ?? 'Lyon' })}</Text>
+                  <Text style={[styles.boardMeta, { color: palette.textSecondary ?? palette.muted }]}>{t('home.monthRank')}</Text>
+                </View>
                 <View style={styles.boardRows}>
                   {topRows.map((row) => (
-                    <LeaderboardRow key={row.userId} row={row} podium onPress={openPlayerProfile} />
+                    <LeaderboardRow
+                      key={row.userId}
+                      row={row}
+                      podium
+                      onPress={openPlayerProfile}
+                      isCurrentUser={row.userId === user.id}
+                      currentUserLabel={t('home.you')}
+                    />
                   ))}
                   {topRows.length === 0 ? (
                     <EmptyState title={t('home.emptyBoardTitle')} body={t('home.emptyBoardBody')} compact />
@@ -343,21 +352,6 @@ export function HomeScreen() {
                   </Text>
                 ) : null}
               </Card>
-            </AnimatedView>
-
-            <AnimatedView style={focusEntry}>
-              <LinearGradient
-                colors={mode === 'day' ? ['#FFF4D6', '#F7FAFF'] : ['#153348', '#10283A']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={[styles.motivation, { borderColor: palette.line }]}
-              >
-                <Text style={[styles.sectionTitle, { color: palette.text }]}>{t('home.coachingFocus')}</Text>
-                <Text style={[styles.motivationText, { color: palette.muted }]}>{motivationalMessage}</Text>
-                <Text style={[styles.motivationMeta, { color: palette.text }]}>
-                  {t('home.monthlyGoalBody', { points: Math.max(0, 1500 - Math.round(rating)) })}
-                </Text>
-              </LinearGradient>
             </AnimatedView>
 
             <AnimatedView style={logoutEntry}>
@@ -515,7 +509,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
   },
-  gearText: { fontSize: 20 },
   heroCard: { gap: 8 },
   heroHead: {
     flexDirection: 'row',
@@ -554,6 +547,8 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   sectionTitle: { fontFamily: theme.fonts.title, fontSize: 16 },
+  boardHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  boardMeta: { fontFamily: theme.fonts.body, fontSize: 12 },
   seasonHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   seasonRank: { fontFamily: theme.fonts.title, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.6 },
   seasonBarTrack: {
@@ -570,21 +565,6 @@ const styles = StyleSheet.create({
   seasonMeta: { marginTop: 8, fontFamily: theme.fonts.body, fontSize: 12 },
   seasonBadge: { marginTop: 4, fontFamily: theme.fonts.title, fontSize: 12 },
   boardRows: { gap: 8, marginTop: 8 },
-  motivation: {
-    borderRadius: 20,
-    borderWidth: 1,
-    padding: 16,
-    gap: 6,
-  },
-  motivationText: {
-    fontFamily: theme.fonts.body,
-    fontSize: 13,
-  },
-  motivationMeta: {
-    fontFamily: theme.fonts.title,
-    fontSize: 12,
-    marginTop: 2,
-  },
   logout: {
     minHeight: 50,
     borderRadius: 12,

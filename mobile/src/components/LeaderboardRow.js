@@ -15,10 +15,17 @@ function rankFromRating(rating) {
   return 'Bronze I';
 }
 
-export function LeaderboardRow({ row, podium = false, onPress }) {
+export function LeaderboardRow({
+  row,
+  podium = false,
+  onPress,
+  isCurrentUser = false,
+  currentUserLabel = 'You',
+}) {
   const { palette } = useUi();
   const rating = Math.round(row?.rankingScore ?? row?.rating ?? 0);
   const badge = rankFromRating(rating);
+  const isTopThree = Number(row?.rank ?? 99) <= 3;
 
   return (
     <Pressable
@@ -27,17 +34,25 @@ export function LeaderboardRow({ row, podium = false, onPress }) {
       style={[
         styles.row,
         {
-          borderColor: palette.line,
-          backgroundColor: podium ? `${palette.accent}1A` : palette.card,
+          backgroundColor: isCurrentUser ? palette.accentMuted : (podium ? palette.cardStrong : palette.card),
+          shadowColor: palette.shadow,
+          shadowOpacity: podium || isCurrentUser ? 0.2 : 0.08,
         },
       ]}
     >
-      <Text style={[styles.position, { color: row.rank <= 3 ? palette.accent : palette.muted }]}>
+      <Text style={[styles.position, { color: isTopThree ? palette.accent : palette.muted }]}>
         {row.rank}
       </Text>
       <Avatar name={row.displayName} size="sm" rating={rating} />
       <View style={styles.middle}>
-        <Text style={[styles.name, { color: palette.text }]} numberOfLines={1}>{row.displayName}</Text>
+        <View style={styles.nameRow}>
+          <Text style={[styles.name, { color: palette.text }]} numberOfLines={1}>{row.displayName}</Text>
+          {isCurrentUser ? (
+            <View style={[styles.youBadge, { backgroundColor: palette.accent, shadowColor: palette.glow }]}>
+              <Text style={[styles.youBadgeText, { color: palette.accentText }]}>{currentUserLabel}</Text>
+            </View>
+          ) : null}
+        </View>
         <RankBadge rank={badge} size="sm" />
       </View>
       <Text style={[styles.score, { color: palette.text }]}>{rating} PIR</Text>
@@ -49,11 +64,13 @@ const styles = StyleSheet.create({
   row: {
     minHeight: 58,
     borderRadius: 14,
-    borderWidth: 1,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 10,
     gap: 10,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
   },
   position: {
     width: 24,
@@ -65,9 +82,30 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 2,
   },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   name: {
+    flex: 1,
     fontFamily: theme.fonts.title,
     fontSize: 14,
+  },
+  youBadge: {
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    shadowOpacity: 0.24,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 2,
+  },
+  youBadgeText: {
+    fontFamily: theme.fonts.title,
+    fontSize: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
   },
   score: {
     fontFamily: theme.fonts.title,

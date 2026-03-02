@@ -25,6 +25,8 @@ export function PirGauge({
   rank = 'Bronze I',
   min = 800,
   max = 2000,
+  size = 220,
+  strokeWidth = 14,
 }) {
   const { palette } = useUi();
   const progressAnim = useRef(new Animated.Value(0)).current;
@@ -38,6 +40,12 @@ export function PirGauge({
   const start = 135;
   const end = start + sweep;
   const activeEnd = start + sweep * progress;
+  const center = size / 2;
+  const radius = Math.max(24, center - strokeWidth - 14);
+  const centerTop = size * 0.34;
+  const valueSize = Math.max(34, Math.round(size * 0.22));
+  const rankSize = Math.max(10, Math.round(size * 0.055));
+  const deltaSize = Math.max(11, Math.round(size * 0.06));
 
   useEffect(() => {
     const sub = progressAnim.addListener(({ value }) => setProgress(value));
@@ -56,35 +64,35 @@ export function PirGauge({
   const deltaLabel = `${delta >= 0 ? '+' : ''}${Math.round(delta)}`;
 
   return (
-    <View style={styles.wrap}>
-      <Svg width={220} height={220} viewBox="0 0 220 220">
+    <View style={[styles.wrap, { width: size, height: size }]}>
+      <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
         <Defs>
           <LinearGradient id="pirGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-            <Stop offset="0%" stopColor="#E5544B" />
-            <Stop offset="50%" stopColor="#E8A800" />
-            <Stop offset="100%" stopColor="#00B89C" />
+            <Stop offset="0%" stopColor={palette.danger} />
+            <Stop offset="50%" stopColor={palette.accent} />
+            <Stop offset="100%" stopColor={palette.accent2} />
           </LinearGradient>
         </Defs>
         <Path
-          d={arcPath(110, 110, 82, start, end)}
+          d={arcPath(center, center, radius, start, end)}
           stroke={palette.line}
-          strokeWidth={14}
+          strokeWidth={strokeWidth}
           strokeLinecap="round"
           fill="none"
         />
         <Path
-          d={arcPath(110, 110, 82, start, activeEnd)}
+          d={arcPath(center, center, radius, start, activeEnd)}
           stroke="url(#pirGradient)"
-          strokeWidth={14}
+          strokeWidth={strokeWidth}
           strokeLinecap="round"
           fill="none"
         />
       </Svg>
 
-      <View style={styles.centerContent} pointerEvents="none">
-        <Text style={[styles.value, { color: palette.text }]}>{Math.round(pir)}</Text>
-        <Text style={[styles.rank, { color: palette.muted }]}>{rank}</Text>
-        <Text style={[styles.delta, { color: deltaColor }]}>↗ {deltaLabel}</Text>
+      <View style={[styles.centerContent, { top: centerTop }]} pointerEvents="none">
+        <Text style={[styles.value, { color: palette.text, fontSize: valueSize, lineHeight: valueSize + 2 }]}>{Math.round(pir)}</Text>
+        <Text style={[styles.rank, { color: palette.muted, fontSize: rankSize }]}>{rank}</Text>
+        <Text style={[styles.delta, { color: deltaColor, fontSize: deltaSize }]}>↗ {deltaLabel}</Text>
       </View>
     </View>
   );
@@ -102,16 +110,12 @@ const styles = StyleSheet.create({
     position: 'absolute',
     alignItems: 'center',
     justifyContent: 'center',
-    top: 72,
   },
   value: {
     fontFamily: theme.fonts.display,
-    fontSize: 48,
-    lineHeight: 50,
   },
   rank: {
     fontFamily: theme.fonts.title,
-    fontSize: 12,
     letterSpacing: 0.5,
     textTransform: 'uppercase',
     marginTop: 2,
@@ -119,6 +123,5 @@ const styles = StyleSheet.create({
   delta: {
     marginTop: 6,
     fontFamily: theme.fonts.title,
-    fontSize: 13,
   },
 });
