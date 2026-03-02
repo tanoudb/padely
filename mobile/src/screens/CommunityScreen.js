@@ -156,6 +156,8 @@ export function CommunityScreen() {
   const [clubQrOpen, setClubQrOpen] = useState(false);
   const [error, setError] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  const [rankingPeriod, setRankingPeriod] = useState('season');
+  const [localLeaderboard, setLocalLeaderboard] = useState([]);
 
   const greeting = useMemo(() => greetingLine(user.displayName, t), [user.displayName, t]);
   const routeFriendId = route.params?.friendId ? String(route.params.friendId) : '';
@@ -245,6 +247,17 @@ export function CommunityScreen() {
         firstPublic ? refreshChannelMessages(firstPublic) : Promise.resolve(),
         firstClub ? refreshChannelMessages(firstClub) : Promise.resolve(),
       ]);
+      const board = await api.leaderboardByPeriod(token, city, rankingPeriod);
+      setLocalLeaderboard(board.rows ?? []);
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
+  async function refreshLocalLeaderboard(period, targetCity) {
+    try {
+      const board = await api.leaderboardByPeriod(token, targetCity, period);
+      setLocalLeaderboard(board.rows ?? []);
     } catch (e) {
       setError(e.message);
     }
@@ -325,6 +338,10 @@ export function CommunityScreen() {
   useEffect(() => {
     refreshCrew().catch(() => {});
   }, [token, city]);
+
+  useEffect(() => {
+    refreshLocalLeaderboard(rankingPeriod, city).catch(() => {});
+  }, [rankingPeriod, city, token]);
 
   useEffect(() => {
     if (!selectedFriend) {
@@ -900,12 +917,25 @@ export function CommunityScreen() {
 
           <Card>
             <Text style={styles.sectionTitle}>{t('community.localRanking', { city })}</Text>
-            {(crew?.leaderboard ?? []).slice(0, 8).map((row) => (
+            <View style={styles.periodRow}>
+              <ChannelPill
+                label={t('community.periodSeason')}
+                active={rankingPeriod === 'season'}
+                onPress={() => setRankingPeriod('season')}
+              />
+              <ChannelPill
+                label={t('community.periodAll')}
+                active={rankingPeriod === 'all'}
+                onPress={() => setRankingPeriod('all')}
+              />
+            </View>
+            {(localLeaderboard ?? []).slice(0, 8).map((row) => (
               <Pressable key={row.userId} style={styles.rankRow} onPress={() => openPlayerProfile(row)}>
                 <Text style={styles.rankName}>#{row.rank} {row.displayName}</Text>
                 <Text style={styles.rankScore}>{row.rating}</Text>
               </Pressable>
             ))}
+            {(localLeaderboard ?? []).length === 0 ? <Text style={styles.emptyText}>{t('community.noSeasonRanking')}</Text> : null}
           </Card>
         </>
       ) : null}
@@ -1380,6 +1410,11 @@ const styles = StyleSheet.create({
     color: theme.colors.accent,
     fontFamily: theme.fonts.mono,
     fontSize: 12,
+  },
+  periodRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 8,
   },
   emptyText: {
     color: theme.colors.muted,

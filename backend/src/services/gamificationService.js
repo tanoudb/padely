@@ -56,8 +56,19 @@ export async function runSeasonSoftReset() {
 
   for (const user of users) {
     const newRating = softReset(user.rating);
-    await store.updateUser(user.id, { rating: newRating });
-    updates.push({ userId: user.id, previous: user.rating, next: newRating });
+    const currentPir = Number(user.pir ?? 50);
+    const nextPir = Number((50 + (currentPir - 50) * 0.45).toFixed(2));
+    await store.updateUser(user.id, {
+      rating: newRating,
+      pir: nextPir,
+    });
+    updates.push({
+      userId: user.id,
+      previous: user.rating,
+      next: newRating,
+      previousPir: currentPir,
+      nextPir,
+    });
   }
 
   return updates;

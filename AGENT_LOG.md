@@ -154,3 +154,17 @@ Mobile: `mobile/src/screens/PlayerProfileScreen.js` refondu pour consommer `api.
 ✅
 ### Prochaine mission recommandée
 PARTAGE SOCIAL (image de résultat premium noir/or + share sheet natif)
+
+## [2026-03-02] — Run #09
+### Mission
+SAISONS TRIMESTRIELLES
+### Résultat
+Padely dispose maintenant d’un vrai cycle compétitif trimestriel: l’app affiche la saison en cours avec progression et jours restants, et le classement local peut être filtré sur la période saison.
+Les transitions de saison sont robustes côté backend: les classements de la saison passée sont archivés, un soft reset rating/PIR est appliqué à l’ouverture de la nouvelle saison, et un badge de fin de saison est exposé selon le rang historique.
+### Technique
+Backend: nouveau service `backend/src/services/seasonService.js` (détection saison S1..S4, progression, transition automatique, archive city leaderboard, soft reset rating+PIR, overview), endpoint `GET /api/v1/gamification/seasons` dans `backend/src/server.js`, support `period=season` + `leaderboard/periods.season` dans `backend/src/services/communityService.js` + `backend/src/server.js`, persistance saison dans `backend/src/store/sqliteStore.js` (tables `season_state`, `season_leaderboard_archive`) et fallback mémoire dans `backend/src/store/memoryStore.js`, reset PIR enrichi dans `backend/src/services/gamificationService.js`. Tests ajoutés: `backend/test/seasonSystem.test.js`.
+Mobile: API `api.seasons()` (`mobile/src/api/client.js`), carte saison Home avec barre de progression/rang/jours restants (`mobile/src/screens/HomeScreen.js`), filtre classement local Saison/Global dans Communauté (`mobile/src/screens/CommunityScreen.js`), nouvelles clés i18n FR/EN (`mobile/src/i18n/dictionaries.js`).
+### Statut
+✅
+### Prochaine mission recommandée
+PARTAGE SOCIAL (image résultat) dès que la dépendance `react-native-view-shot` peut être installée

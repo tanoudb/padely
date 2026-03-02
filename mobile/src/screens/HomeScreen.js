@@ -73,6 +73,7 @@ export function HomeScreen() {
   const [dashboard, setDashboard] = useState(null);
   const [recentMatches, setRecentMatches] = useState([]);
   const [cityLeaderboards, setCityLeaderboards] = useState(null);
+  const [seasons, setSeasons] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -110,14 +111,16 @@ export function HomeScreen() {
   }
 
   const loadHome = useCallback(async () => {
-    const [dash, periods, matchesOut] = await Promise.all([
+    const [dash, periods, matchesOut, seasonsOut] = await Promise.all([
       api.dashboard(token, user.id),
       api.leaderboardPeriods(token, user.city ?? 'Lyon'),
       api.listMyMatches(token),
+      api.seasons(token, user.city ?? 'Lyon'),
     ]);
     setDashboard(dash);
     setCityLeaderboards(periods);
     setRecentMatches(matchesOut);
+    setSeasons(seasonsOut);
   }, [token, user.id, user.city]);
 
   useEffect(() => {
@@ -156,6 +159,11 @@ export function HomeScreen() {
   }, [matches, winRate, t]);
 
   const topRows = (cityLeaderboards?.month?.rows ?? []).slice(0, 3);
+  const seasonProgress = Number(seasons?.current?.progress ?? 0);
+  const seasonDaysRemaining = Number(seasons?.current?.daysRemaining ?? 0);
+  const seasonLabel = seasons?.current?.label ?? 'Saison';
+  const seasonRank = Number(seasons?.current?.userRank ?? 0) || null;
+  const lastSeasonBadge = seasons?.history?.[0]?.rewardBadge ?? null;
   const progression = dashboard?.progression ?? [];
   const pirHistory = progression.map((point) => ({
     date: point.at,
@@ -264,6 +272,26 @@ export function HomeScreen() {
               <Text style={[styles.empty, { color: palette.muted }]}>Aucune donnee de classement.</Text>
             ) : null}
           </View>
+        </Card>
+
+        <Card elevated>
+          <View style={styles.seasonHead}>
+            <Text style={[styles.sectionTitle, { color: palette.text }]}>{t('home.seasonTitle', { label: seasonLabel })}</Text>
+            <Text style={[styles.seasonRank, { color: palette.accent }]}>
+              {seasonRank ? t('home.seasonRank', { rank: seasonRank }) : t('home.seasonUnranked')}
+            </Text>
+          </View>
+          <View style={[styles.seasonBarTrack, { backgroundColor: palette.bgAlt, borderColor: palette.line }]}>
+            <View style={[styles.seasonBarFill, { width: `${Math.max(3, Math.min(100, seasonProgress * 100))}%`, backgroundColor: palette.accent }]} />
+          </View>
+          <Text style={[styles.seasonMeta, { color: palette.textSecondary ?? palette.muted }]}>
+            {t('home.seasonDaysLeft', { days: seasonDaysRemaining })}
+          </Text>
+          {lastSeasonBadge ? (
+            <Text style={[styles.seasonBadge, { color: palette.accent2 }]}>
+              {t('home.lastSeasonBadge', { badge: lastSeasonBadge })}
+            </Text>
+          ) : null}
         </Card>
 
         <LinearGradient
@@ -468,6 +496,21 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   sectionTitle: { fontFamily: theme.fonts.title, fontSize: 16 },
+  seasonHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  seasonRank: { fontFamily: theme.fonts.title, fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.6 },
+  seasonBarTrack: {
+    marginTop: 10,
+    height: 12,
+    borderRadius: 999,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  seasonBarFill: {
+    height: '100%',
+    borderRadius: 999,
+  },
+  seasonMeta: { marginTop: 8, fontFamily: theme.fonts.body, fontSize: 12 },
+  seasonBadge: { marginTop: 4, fontFamily: theme.fonts.title, fontSize: 12 },
   boardRows: { gap: 8, marginTop: 8 },
   empty: { fontFamily: theme.fonts.body, fontSize: 13 },
   motivation: {

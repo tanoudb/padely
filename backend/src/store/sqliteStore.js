@@ -215,6 +215,24 @@ export class SQLiteStore {
 
       CREATE INDEX IF NOT EXISTS idx_messages_scope ON messages(kind, scope_key, created_at);
 
+      CREATE TABLE IF NOT EXISTS season_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        payload_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS season_leaderboard_archive (
+        season_key TEXT NOT NULL,
+        city_lower TEXT NOT NULL,
+        rows_json TEXT NOT NULL,
+        meta_json TEXT,
+        archived_at TEXT NOT NULL,
+        PRIMARY KEY (season_key, city_lower)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_season_archive_lookup
+      ON season_leaderboard_archive(season_key, city_lower);
+
       CREATE TABLE IF NOT EXISTS bag_items (
         id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL,
@@ -757,5 +775,48 @@ export class SQLiteStore {
       unlockedAt: row.unlockedAt,
       meta: parseJson(row.meta_json, {}),
     }));
+  }
+
+  getSeasonState() {
+    const row = this.db.prepare('SELECT payload_json FROM season_state WHERE id = 1 LIMIT 1').get();
+    return parseJson(row?.payload_json, null);
+  }
+
+  setSeasonState(payload) {
+    this.db.prepare(`
+      INSERT INTO season_state (id, payload_json, updated_at)
+      VALUES (1, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        payload_json = excluded.payload_json,
+        updated_at = excluded.updated_at
+    `).run(JSON.stringify(payload ?? {}), nowIso());
+    return payload;
+  }
+
+  archiveSeasonLeaderboard(seasonKey, city, rows, meta = {}) {
+    this.db.prepare(`
+      INSERT INTO season_leaderboard_archive (season_key, city_lower, rows_json, meta_json, archived_at)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(season_key, city_lower) DO UPDATE SET
+        rows_json = excluded.rows_json,
+        meta_json = excluded.meta_json,
+        archived_at = excluded.archived_at
+    `).run(
+      String(seasonKey ?? ''),
+      lower(city),
+      JSON.stringify(rows ?? []),
+      JSON.stringify(meta ?? {}),
+      nowIso(),
+    );
+  }
+
+  getSeasonLeaderboardArchive(seasonKey, city) {
+    const row = this.db.prepare(`
+      SELECT rows_json
+      FROM season_leaderboard_archive
+      WHERE season_key = ? AND city_lower = ?
+      LIMIT 1
+    `).get(String(seasonKey ?? ''), lower(city));
+    return parseJson(row?.rows_json, []);
   }
 }

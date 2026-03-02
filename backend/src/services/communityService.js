@@ -304,6 +304,12 @@ function periodRange(period) {
     const start = new Date(now.getFullYear(), now.getMonth(), 1);
     return { start, label: 'mois' };
   }
+  if (period === 'season') {
+    const quarterStartMonth = Math.floor(now.getMonth() / 3) * 3;
+    const quarter = Math.floor(now.getMonth() / 3) + 1;
+    const start = new Date(now.getFullYear(), quarterStartMonth, 1);
+    return { start, label: `saison S${quarter}` };
+  }
   return { start: new Date(0), label: 'global' };
 }
 
@@ -327,6 +333,14 @@ function rankRewards(period) {
       { rank: 1, reward: 'Pack premium 1 mois + trophée city' },
       { rank: 2, reward: 'Pack premium 2 semaines' },
       { rank: 3, reward: 'Badge Monthly Podium' },
+    ];
+  }
+  if (period === 'season') {
+    return [
+      { rank: 1, reward: 'Badge City Champion + Hall of Fame saison' },
+      { rank: 2, reward: 'Badge Season Podium' },
+      { rank: 3, reward: 'Badge Season Podium' },
+      { rank: 10, reward: 'Badge Top 10 Season' },
     ];
   }
   return [

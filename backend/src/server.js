@@ -47,6 +47,7 @@ import {
   runInactivityDecay,
   runSeasonSoftReset,
 } from './services/gamificationService.js';
+import { getSeasonsOverview } from './services/seasonService.js';
 import { createListing, listListings } from './services/marketplaceService.js';
 import {
   createMatch,
@@ -591,13 +592,14 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/v1/community/leaderboard/periods') {
       await requireAuth(req);
       const city = url.searchParams.get('city') ?? 'lyon';
-      const [day, week, month, all] = await Promise.all([
+      const [day, week, month, season, all] = await Promise.all([
         getTemporalLeaderboard({ city, period: 'day' }),
         getTemporalLeaderboard({ city, period: 'week' }),
         getTemporalLeaderboard({ city, period: 'month' }),
+        getTemporalLeaderboard({ city, period: 'season' }),
         getTemporalLeaderboard({ city, period: 'all' }),
       ]);
-      return json(res, 200, { city, day, week, month, all });
+      return json(res, 200, { city, day, week, month, season, all });
     }
 
     if (req.method === 'GET' && url.pathname === '/api/v1/community/arcade/search') {
@@ -630,6 +632,15 @@ const server = http.createServer(async (req, res) => {
         city: url.searchParams.get('city') ?? undefined,
         category: url.searchParams.get('category') ?? undefined,
       }));
+    }
+
+    {
+      const params = pathMatch(url.pathname, '/api/v1/gamification/seasons');
+      if (req.method === 'GET' && params) {
+        const me = await requireAuth(req);
+        const city = url.searchParams.get('city') ?? me.city ?? 'Lyon';
+        return json(res, 200, await getSeasonsOverview({ userId: me.id, city }));
+      }
     }
 
     {

@@ -133,6 +133,8 @@ export const api = {
     request(`/api/v1/stats/public-profile/${encodeURIComponent(playerId)}${toQuery({ period })}`, { token }),
   holes: (token, userId, period = 'all') =>
     request(`/api/v1/stats/performance-holes/${encodeURIComponent(userId)}${toQuery({ period })}`, { token }),
+  seasons: (token, city) =>
+    request(`/api/v1/gamification/seasons${toQuery({ city })}`, { token }),
   listings: (token, city) => request(`/api/v1/marketplace/listings?city=${encodeURIComponent(city)}`, { token }),
   createListing: (token, body) => request('/api/v1/marketplace/listings', { method: 'POST', token, body }),
 };

@@ -112,6 +112,11 @@ export const dictionaries = {
       motivationRecovery: 'Objectif relance: travaille les points d or et rejoue rapidement.',
       hello: 'Salut {name}',
       heroRank: 'Rang {rank} · Classement {rating}',
+      seasonTitle: '{label} · Saison en cours',
+      seasonRank: 'Rang #{rank}',
+      seasonUnranked: 'Hors top',
+      seasonDaysLeft: '{days} jours restants',
+      lastSeasonBadge: 'Badge fin de saison: {badge}',
     },
     play: {
       boardKicker: 'TABLEAU DE SCORE',
@@ -282,6 +287,9 @@ export const dictionaries = {
       clubMessagePlaceholder: 'Message au canal du club',
       clubFeedEmpty: 'Rejoins un premier club pour voir le flux.',
       localRanking: 'Classement local · {city}',
+      periodSeason: 'Saison',
+      periodAll: 'Global',
+      noSeasonRanking: 'Aucun classement disponible sur cette periode.',
     },
     profile: {
       space: 'ESPACE PERSONNEL',
@@ -452,6 +460,11 @@ export const dictionaries = {
       motivationRecovery: 'Comeback mode: work on golden points and play again soon.',
       hello: 'Hi {name}',
       heroRank: 'Rank {rank} · Rating {rating}',
+      seasonTitle: '{label} · Current season',
+      seasonRank: 'Rank #{rank}',
+      seasonUnranked: 'Unranked',
+      seasonDaysLeft: '{days} days left',
+      lastSeasonBadge: 'Last season badge: {badge}',
     },
     play: {
       boardKicker: 'LIVE SCOREBOARD',
@@ -622,6 +635,9 @@ export const dictionaries = {
       clubMessagePlaceholder: 'Message to club channel',
       clubFeedEmpty: 'Join a club to unlock this feed.',
       localRanking: 'Local ranking · {city}',
+      periodSeason: 'Season',
+      periodAll: 'All-time',
+      noSeasonRanking: 'No ranking available for this period.',
     },
     profile: {
       space: 'PERSONAL SPACE',

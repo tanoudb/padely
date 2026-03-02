@@ -33,6 +33,8 @@ export class MemoryStore {
     this.pairRatings = new Map();
     this.messages = new Map();
     this.badges = new Map();
+    this.seasonState = null;
+    this.seasonArchive = new Map();
     this.clubs = [
       {
         key: 'club:urban-padel-lyon',
@@ -388,5 +390,30 @@ export class MemoryStore {
 
   listBadgesForUser(userId) {
     return this.badges.get(userId) ?? [];
+  }
+
+  getSeasonState() {
+    return this.seasonState ? { ...this.seasonState } : null;
+  }
+
+  setSeasonState(payload) {
+    this.seasonState = { ...(payload ?? {}) };
+    return this.getSeasonState();
+  }
+
+  archiveSeasonLeaderboard(seasonKey, city, rows, meta = {}) {
+    const key = `${String(seasonKey ?? '')}:${String(city ?? '').toLowerCase()}`;
+    this.seasonArchive.set(key, {
+      seasonKey: String(seasonKey ?? ''),
+      city: String(city ?? ''),
+      rows: Array.isArray(rows) ? rows : [],
+      meta: meta ?? {},
+      archivedAt: nowIso(),
+    });
+  }
+
+  getSeasonLeaderboardArchive(seasonKey, city) {
+    const key = `${String(seasonKey ?? '')}:${String(city ?? '').toLowerCase()}`;
+    return this.seasonArchive.get(key)?.rows ?? [];
   }
 }
