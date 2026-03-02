@@ -183,3 +183,17 @@ Tests : nouveau fichier `backend/test/matchmakingSuggestions.test.js` couvrant s
 ✅
 ### Prochaine mission recommandée
 PARTAGE SOCIAL (image résultat premium + share sheet) dès que `react-native-view-shot` est installable
+
+## [2026-03-02] — Run #11
+### Mission
+ÉCRAN VICTOIRE ÉMOTIONNEL
+### Résultat
+L’écran de fin de match est désormais une vraie séquence émotionnelle en 2 secondes: apparition cinématique noir/or, titre, sous-titre, score, jauge PIR, puis delta animé.
+En cas de défaite, le ton devient neutre (“MATCH TERMINÉ”) au lieu d’un message de victoire, avec trois actions claires en sortie: partager, rejouer immédiatement, ou retourner à l’accueil.
+### Technique
+Mobile: refonte complète de `mobile/src/components/VictoryOverlay.js` (timeline animée séquentielle, ambiance premium, intégration `PirGauge`, CTA `share/replay/home`), adaptation de `mobile/src/screens/PlayScreen.js` (détection victoire/défaite côté utilisateur, passage PIR/rang, navigation HomeTab depuis overlay), nouvelles traductions FR/EN dans `mobile/src/i18n/dictionaries.js` (`play.replay`, `play.home`, `play.matchFinishedTitle`, `play.matchFinishedSub`).
+Validation: backend tests OK `32/32` (`npm test`), bundle mobile iOS exporté avec succès via `npx expo export --platform ios`.
+### Statut
+✅
+### Prochaine mission recommandée
+PARTAGE SOCIAL (image résultat premium) dès que l’installation de `react-native-view-shot` est possible (réseau npm indisponible sur ce run)

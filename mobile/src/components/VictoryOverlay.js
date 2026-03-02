@@ -1,19 +1,8 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { PirGauge } from './PirGauge';
 import { useUi } from '../state/ui';
 import { theme } from '../theme';
-
-function makePieces() {
-  return Array.from({ length: 28 }).map((_, index) => ({
-    id: index,
-    left: 8 + Math.random() * 84,
-    size: 6 + Math.random() * 8,
-    delay: Math.random() * 450,
-    duration: 900 + Math.random() * 1100,
-    rotate: `${Math.round(Math.random() * 120 - 60)}deg`,
-    color: ['#F4D35E', '#00D1B2', '#E5544B', '#7FA4FF'][Math.floor(Math.random() * 4)],
-  }));
-}
 
 export function VictoryOverlay({
   visible,
@@ -21,17 +10,26 @@ export function VictoryOverlay({
   subtitle,
   scoreLine,
   pirDelta = 0,
+  pirValue = 1200,
+  rankLabel = 'Classement',
+  isVictory = true,
   onShare,
   shareLabel,
-  continueLabel,
-  onContinue,
+  replayLabel,
+  homeLabel,
+  onReplay,
+  onHome,
 }) {
   const { palette } = useUi();
-  const rise = useRef(new Animated.Value(0)).current;
+  const backdrop = useRef(new Animated.Value(0)).current;
+  const titleAnim = useRef(new Animated.Value(0)).current;
+  const subtitleAnim = useRef(new Animated.Value(0)).current;
+  const scoreAnim = useRef(new Animated.Value(0)).current;
+  const gaugeAnim = useRef(new Animated.Value(0)).current;
+  const deltaAnim = useRef(new Animated.Value(0)).current;
+  const actionsAnim = useRef(new Animated.Value(0)).current;
   const count = useRef(new Animated.Value(0)).current;
-  const confetti = useRef(new Animated.Value(0)).current;
   const [displayDelta, setDisplayDelta] = useState(0);
-  const pieces = useMemo(() => makePieces(), []);
 
   useEffect(() => {
     const id = count.addListener(({ value }) => {
@@ -44,108 +42,157 @@ export function VictoryOverlay({
 
   useEffect(() => {
     if (!visible) {
-      rise.setValue(0);
-      confetti.setValue(0);
+      backdrop.setValue(0);
+      titleAnim.setValue(0);
+      subtitleAnim.setValue(0);
+      scoreAnim.setValue(0);
+      gaugeAnim.setValue(0);
+      deltaAnim.setValue(0);
+      actionsAnim.setValue(0);
       count.setValue(0);
       setDisplayDelta(0);
       return;
     }
 
-    Animated.parallel([
-      Animated.spring(rise, {
+    Animated.sequence([
+      Animated.timing(backdrop, {
         toValue: 1,
-        bounciness: 14,
-        speed: 11,
+        duration: 220,
+        easing: Easing.out(Easing.quad),
         useNativeDriver: true,
       }),
-      Animated.timing(confetti, {
+      Animated.timing(titleAnim, {
         toValue: 1,
-        duration: 1600,
+        duration: 340,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(subtitleAnim, {
+        toValue: 1,
+        duration: 300,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(scoreAnim, {
+        toValue: 1,
+        duration: 280,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(gaugeAnim, {
+        toValue: 1,
+        duration: 420,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }),
       Animated.timing(count, {
         toValue: pirDelta,
-        duration: 820,
+        duration: 420,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: false,
       }),
+      Animated.timing(deltaAnim, {
+        toValue: 1,
+        duration: 180,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }),
+      Animated.timing(actionsAnim, {
+        toValue: 1,
+        duration: 160,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
     ]).start();
-  }, [visible, pirDelta, rise, confetti, count]);
+  }, [visible, pirDelta, backdrop, titleAnim, subtitleAnim, scoreAnim, gaugeAnim, deltaAnim, actionsAnim, count]);
 
   return (
     <Modal visible={visible} transparent animationType="fade">
-      <View style={styles.backdrop}>
-        {pieces.map((piece) => (
-          <Animated.View
-            key={piece.id}
+      <Animated.View style={[styles.backdrop, { opacity: backdrop }]}>
+        <View style={styles.backdropGlow} />
+        <View style={[styles.ambientOrb, styles.ambientOrbLeft, { backgroundColor: palette.accentMuted }]} />
+        <View style={[styles.ambientOrb, styles.ambientOrbRight, { backgroundColor: palette.accent2Muted }]} />
+
+        <View style={[styles.card, { backgroundColor: palette.cardStrong, borderColor: palette.lineStrong }]}>
+          <Animated.Text
             style={[
-              styles.confetti,
+              styles.title,
               {
-                left: `${piece.left}%`,
-                width: piece.size,
-                height: piece.size * 1.3,
-                backgroundColor: piece.color,
-                transform: [
-                  { rotate: piece.rotate },
-                  {
-                    translateY: confetti.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [-260 - piece.delay, 420 + piece.delay],
-                    }),
-                  },
-                ],
-                opacity: confetti.interpolate({
-                  inputRange: [0, 0.12, 0.9, 1],
-                  outputRange: [0, 0.9, 0.9, 0],
-                }),
+                color: isVictory ? palette.accent : palette.text,
+                opacity: titleAnim,
+                transform: [{ translateY: titleAnim.interpolate({ inputRange: [0, 1], outputRange: [14, 0] }) }],
               },
             ]}
-          />
-        ))}
+          >
+            {title}
+          </Animated.Text>
+          <Animated.Text
+            style={[
+              styles.subtitle,
+              {
+                color: palette.textSecondary ?? palette.muted,
+                opacity: subtitleAnim,
+                transform: [{ translateY: subtitleAnim.interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) }],
+              },
+            ]}
+          >
+            {subtitle}
+          </Animated.Text>
+          <Animated.Text
+            style={[
+              styles.score,
+              {
+                color: palette.text,
+                opacity: scoreAnim,
+                transform: [{ scale: scoreAnim.interpolate({ inputRange: [0, 1], outputRange: [0.98, 1] }) }],
+              },
+            ]}
+          >
+            {scoreLine}
+          </Animated.Text>
 
-        <Animated.View
-          style={[
-            styles.card,
-            {
-              backgroundColor: palette.cardStrong,
-              borderColor: palette.accent,
-              transform: [
-                {
-                  translateY: rise.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [140, 0],
-                  }),
-                },
-                {
-                  scale: rise.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [0.88, 1],
-                  }),
-                },
-              ],
-              opacity: rise,
-            },
-          ]}
-        >
-          <Text style={[styles.title, { color: palette.text }]}>{title}</Text>
-          <Text style={[styles.subtitle, { color: palette.muted }]}>{subtitle}</Text>
-          <Text style={[styles.score, { color: palette.text }]}>{scoreLine}</Text>
-          <Text style={[styles.delta, { color: pirDelta >= 0 ? palette.accent2 : palette.danger }]}>
+          <Animated.View
+            style={[
+              styles.gaugeWrap,
+              {
+                opacity: gaugeAnim,
+                transform: [{ scale: gaugeAnim.interpolate({ inputRange: [0, 1], outputRange: [0.92, 1] }) }],
+              },
+            ]}
+          >
+            <PirGauge pir={pirValue} delta={pirDelta} rank={rankLabel} />
+          </Animated.View>
+
+          <Animated.Text
+            style={[
+              styles.delta,
+              {
+                color: pirDelta >= 0 ? palette.accent2 : palette.danger,
+                opacity: deltaAnim,
+                transform: [{ translateY: deltaAnim.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }],
+              },
+            ]}
+          >
             PIR {displayDelta >= 0 ? '+' : ''}{displayDelta}
-          </Text>
+          </Animated.Text>
 
-          {onShare ? (
-            <Pressable style={[styles.shareBtn, { borderColor: palette.line }]} onPress={onShare}>
-              <Text style={[styles.shareText, { color: palette.text }]}>{shareLabel}</Text>
+          <Animated.View style={{ width: '100%', opacity: actionsAnim }}>
+            {onShare ? (
+              <Pressable style={[styles.shareBtn, { borderColor: palette.line, backgroundColor: palette.card }]} onPress={onShare}>
+                <Text style={[styles.shareText, { color: palette.text }]}>{shareLabel}</Text>
+              </Pressable>
+            ) : null}
+
+            <Pressable style={[styles.mainBtn, { backgroundColor: palette.accent }]} onPress={onReplay}>
+              <Text style={[styles.mainBtnText, { color: palette.accentText }]}>{replayLabel}</Text>
             </Pressable>
-          ) : null}
 
-          <Pressable style={[styles.mainBtn, { backgroundColor: palette.accent }]} onPress={onContinue}>
-            <Text style={styles.mainBtnText}>{continueLabel}</Text>
-          </Pressable>
-        </Animated.View>
-      </View>
+            <Pressable style={styles.ghostBtn} onPress={onHome}>
+              <Text style={[styles.ghostBtnText, { color: palette.textSecondary ?? palette.muted }]}>{homeLabel}</Text>
+            </Pressable>
+          </Animated.View>
+        </View>
+      </Animated.View>
     </Modal>
   );
 }
@@ -153,20 +200,36 @@ export function VictoryOverlay({
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(3, 10, 18, 0.78)',
+    backgroundColor: '#050507',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
   },
-  confetti: {
+  backdropGlow: {
     position: 'absolute',
-    top: -20,
-    borderRadius: 3,
+    width: 320,
+    height: 320,
+    borderRadius: 160,
+    backgroundColor: 'rgba(212, 168, 83, 0.08)',
+  },
+  ambientOrb: {
+    position: 'absolute',
+    width: 180,
+    height: 180,
+    borderRadius: 90,
+  },
+  ambientOrbLeft: {
+    left: -42,
+    top: 90,
+  },
+  ambientOrbRight: {
+    right: -42,
+    bottom: 140,
   },
   card: {
     width: '100%',
     maxWidth: 420,
-    borderWidth: 2,
+    borderWidth: 1,
     borderRadius: 24,
     padding: 18,
     alignItems: 'center',
@@ -185,11 +248,17 @@ const styles = StyleSheet.create({
   },
   score: {
     marginTop: 2,
-    fontFamily: theme.fonts.title,
-    fontSize: 16,
+    fontFamily: theme.fonts.mono,
+    fontSize: 28,
+    letterSpacing: 1.1,
+  },
+  gaugeWrap: {
+    marginTop: 2,
+    width: '100%',
+    alignItems: 'center',
   },
   delta: {
-    marginTop: 8,
+    marginTop: 2,
     fontFamily: theme.fonts.display,
     fontSize: 34,
     lineHeight: 36,
@@ -210,7 +279,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.7,
   },
   mainBtn: {
-    marginTop: 8,
+    marginTop: 10,
     minHeight: 50,
     borderRadius: 14,
     width: '100%',
@@ -218,10 +287,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   mainBtnText: {
-    color: '#3A2500',
     fontFamily: theme.fonts.title,
     textTransform: 'uppercase',
     letterSpacing: 0.8,
     fontSize: 12,
+  },
+  ghostBtn: {
+    marginTop: 10,
+    minHeight: 36,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  ghostBtnText: {
+    fontFamily: theme.fonts.body,
+    fontSize: 13,
   },
 });

@@ -14,6 +14,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { API_URL, api } from '../api/client';
@@ -244,6 +245,7 @@ function scoreStateForLive(state) {
 export function PlayScreen() {
   const { token, user } = useSession();
   const { t } = useI18n();
+  const navigation = useNavigation();
   const matchFormat = user.settings?.matchFormat ?? 'marathon';
   const autoSaveMatch = Boolean(user.settings?.autoSaveMatch ?? true);
   const defaultMatchMode = user.settings?.defaultMatchMode === 'friendly' ? 'friendly' : 'ranked';
@@ -311,6 +313,13 @@ export function PlayScreen() {
   const winnerTone = useMemo(() => {
     if (!score.winner || setsPayload.length === 0) {
       return null;
+    }
+    if (score.winner !== 'a') {
+      return {
+        titleKey: 'play.matchFinishedTitle',
+        subtitleKey: 'play.matchFinishedSub',
+        color: '#A1A1AA',
+      };
     }
     return victoryTone(setsPayload, score.winner);
   }, [score.winner, setsPayload]);
@@ -1167,10 +1176,18 @@ export function PlayScreen() {
         ].filter(Boolean).join(' · ')}
         scoreLine={t('play.finalScore', { score: setsPayload.map((set) => `${set.a}-${set.b}`).join(' / ') })}
         pirDelta={victoryPirDelta}
+        pirValue={Number(user.pir ?? 0) + Number(victoryPirDelta ?? 0)}
+        rankLabel={user.rankName ?? 'Classement'}
+        isVictory={score.winner === 'a'}
         onShare={savedInviteUrl ? shareInvite : undefined}
         shareLabel={t('play.share')}
-        continueLabel={t('play.continue')}
-        onContinue={closeVictory}
+        replayLabel={t('play.replay')}
+        homeLabel={t('play.home')}
+        onReplay={closeVictory}
+        onHome={() => {
+          closeVictory();
+          navigation.getParent()?.navigate('HomeTab');
+        }}
       />
 
       <QrScannerModal
