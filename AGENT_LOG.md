@@ -211,3 +211,18 @@ Validation: backend tests `32/32` (`npm test`) + export Expo iOS et Android réu
 ✅
 ### Prochaine mission recommandée
 PARTAGE SOCIAL (image résultat premium noir/or + share sheet natif)
+
+## [2026-03-02] — Run #13
+### Mission
+SYSTÈME DE BADGES END-TO-END
+### Résultat
+Les badges Padely sont maintenant un vrai système produit: 8 badges premium sont attribués automatiquement après chaque match validé, persistés en base, et notifiés en push en temps réel aux joueurs concernés.
+Dans le profil joueur, la section badges est désormais visible et addictive: grille 4 colonnes avec états locked/unlocked, style premium noir/or, et animation de déverrouillage (spring + particules) quand un badge tombe.
+### Technique
+Backend: refonte `backend/src/services/gamificationService.js` avec catalogue badges (`first_blood`, `serial_winner`, `ironman`, `upset_king`, `golden_touch`, `social_butterfly`, `city_champion`, `marathon_man`), règles de calcul (win streak, upset gap, social signals, ranking ville, volume jeu), payload enrichi (`catalog`, `newlyUnlocked`, `stats`). Intégration auto dans `backend/src/services/matchService.js` après match validé/friendly validé + push `badge_unlocked` via `sendPushToUsers`.
+Mobile: `mobile/src/api/client.js` ajoute `api.badges`, `mobile/src/screens/ProfileScreen.js` intègre la grille badges 4 colonnes lock/unlock + overlay animation unlock + synchronisation des nouveaux badges, `mobile/src/utils/pushRealtime.js` route les push badges vers l’onglet Profil.
+Tests: nouveau `backend/test/badgeSystem.test.js` (unlock auto après validation + push badge + badge social), suite backend verte `34/34`.
+### Statut
+✅
+### Prochaine mission recommandée
+PARTAGE SOCIAL (image de résultat noir/or + share sheet) dès que `react-native-view-shot` est installable

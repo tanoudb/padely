@@ -6,6 +6,7 @@ import { newId } from '../utils/id.js';
 import { refreshCityLeaderboard } from './communityService.js';
 import { closeLiveMatchSession } from './liveMatchService.js';
 import { sendPushToUsers } from './pushService.js';
+import { evaluateBadges } from './gamificationService.js';
 
 function pairKey(team) {
   return [...team].sort().join(':');
@@ -273,6 +274,36 @@ async function notifyLeaderboardMovement(cities, matchId) {
         matchId,
       },
     });
+  }
+}
+
+async function notifyBadgeUnlocks(userId, matchId, evaluation) {
+  const fresh = Array.isArray(evaluation?.newlyUnlocked) ? evaluation.newlyUnlocked : [];
+  for (const item of fresh) {
+    await sendPushToUsers([userId], {
+      title: 'Badge debloque',
+      body: `${item.title} est maintenant a toi.`,
+      data: {
+        type: 'badge_unlocked',
+        badgeKey: item.badgeKey,
+        profileUserId: userId,
+        matchId,
+      },
+    });
+  }
+}
+
+async function refreshBadgesAfterValidation(userIds = [], matchId, source) {
+  for (const userId of [...new Set(userIds.filter(Boolean))]) {
+    try {
+      const evaluation = await evaluateBadges(userId, {
+        source,
+        matchId,
+      });
+      await notifyBadgeUnlocks(userId, matchId, evaluation);
+    } catch {
+      // Badge computation never blocks match lifecycle.
+    }
   }
 }
 
@@ -600,6 +631,7 @@ export async function createMatch(payload, createdBy) {
       },
       validatedAt: new Date().toISOString(),
     });
+    await refreshBadgesAfterValidation(friendlyMatch.players ?? [], friendlyMatch.id, 'friendly_match_validated');
     await notifyMatchCreated(friendlyMatch);
     return friendlyMatch;
   }
@@ -680,12 +712,14 @@ export async function rateValidatedMatch(matchId) {
   }
 
   if (match.mode === 'friendly' || match.isRated === false) {
-    return store.updateMatch(matchId, {
+    const validated = await store.updateMatch(matchId, {
       status: 'validated',
       rated: false,
       ratingResult: null,
       validatedAt: new Date().toISOString(),
     });
+    await refreshBadgesAfterValidation(validated.players ?? [], validated.id, 'match_validated');
+    return validated;
   }
 
   const teamASlots = participantsForMatch(match, 'teamA');
@@ -778,6 +812,7 @@ export async function rateValidatedMatch(matchId) {
     .map((id) => usersById.get(id)?.city)
     .filter((city) => String(city ?? '').trim().length > 0))];
   await notifyLeaderboardMovement(affectedCities, matchId);
+  await refreshBadgesAfterValidation(userIds, validatedMatch.id, 'match_validated');
 
   return validatedMatch;
 }

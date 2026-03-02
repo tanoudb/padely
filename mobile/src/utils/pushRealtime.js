@@ -89,6 +89,15 @@ export function resolvePushRoute(data = {}) {
     };
   }
 
+  if (type === 'badge_unlocked') {
+    return {
+      tab: 'ProfileTab',
+      params: {
+        screen: 'ProfileMain',
+      },
+    };
+  }
+
   if (profileUserId) {
     return {
       tab: 'ProfileTab',

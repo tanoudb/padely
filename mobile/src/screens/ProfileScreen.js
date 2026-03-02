@@ -1,5 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withSequence,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
 import { api } from '../api/client';
 import { Card } from '../components/Card';
 import { useI18n } from '../state/i18n';
@@ -8,6 +16,16 @@ import { useUi } from '../state/ui';
 import { theme } from '../theme';
 
 const PERIODS = ['week', 'month', 'season', 'all'];
+const BADGE_FALLBACK = [
+  { key: 'first_blood', title: 'First Blood', description: 'Valider ton premier match.' },
+  { key: 'serial_winner', title: 'Serial Winner', description: '6 victoires consecutives.' },
+  { key: 'ironman', title: 'Ironman', description: '30 matchs valides.' },
+  { key: 'upset_king', title: 'Upset King', description: 'Upset de 180+ points.' },
+  { key: 'golden_touch', title: 'Golden Touch', description: '15 puntos de oro.' },
+  { key: 'social_butterfly', title: 'Social Butterfly', description: 'Reseau local actif.' },
+  { key: 'city_champion', title: 'City Champion', description: 'Top 1 de ta ville.' },
+  { key: 'marathon_man', title: 'Marathon Man', description: '15h de jeu ou 5 marathons.' },
+];
 
 function rankFromRating(rating) {
   if (rating >= 2100) return 'Or I';
@@ -79,6 +97,83 @@ function Heatmap({ items, palette }) {
   );
 }
 
+function BadgeUnlockOverlay({ badge, palette }) {
+  const reveal = useSharedValue(0);
+  const pulse = useSharedValue(0);
+
+  useEffect(() => {
+    if (!badge) {
+      reveal.value = withTiming(0, { duration: 180 });
+      return;
+    }
+    reveal.value = 0;
+    pulse.value = 0;
+    reveal.value = withSpring(1, { damping: 15, stiffness: 150, mass: 0.8 });
+    pulse.value = withSequence(
+      withTiming(1, { duration: 450, easing: Easing.out(Easing.cubic) }),
+      withTiming(0, { duration: 350, easing: Easing.inOut(Easing.quad) }),
+      withTiming(1, { duration: 360, easing: Easing.out(Easing.cubic) }),
+    );
+  }, [badge, pulse, reveal]);
+
+  const wrapStyle = useAnimatedStyle(() => ({
+    opacity: reveal.value,
+    transform: [
+      { translateY: (1 - reveal.value) * -26 },
+      { scale: 0.96 + reveal.value * 0.04 },
+    ],
+  }));
+
+  const sparkleStyle = useAnimatedStyle(() => ({
+    opacity: pulse.value * 0.95,
+    transform: [{ scale: 0.6 + pulse.value * 0.55 }],
+  }));
+
+  if (!badge) {
+    return null;
+  }
+
+  return (
+    <Animated.View style={[styles.unlockOverlay, wrapStyle, { backgroundColor: palette.bgElevated ?? palette.card, borderColor: palette.accent }]}>
+      <Animated.View style={[styles.sparkleA, sparkleStyle, { backgroundColor: palette.accent }]} />
+      <Animated.View style={[styles.sparkleB, sparkleStyle, { backgroundColor: palette.accent2 }]} />
+      <Animated.View style={[styles.sparkleC, sparkleStyle, { backgroundColor: palette.accent }]} />
+      <Text style={[styles.unlockKicker, { color: palette.accent }]}>NOUVEAU BADGE</Text>
+      <Text style={[styles.unlockTitle, { color: palette.text }]}>{badge.title}</Text>
+      <Text style={[styles.unlockSub, { color: palette.textSecondary }]} numberOfLines={2}>{badge.description}</Text>
+    </Animated.View>
+  );
+}
+
+function BadgeGrid({ catalog, palette }) {
+  const rows = Array.isArray(catalog) && catalog.length ? catalog : BADGE_FALLBACK;
+  return (
+    <View style={styles.badgeGrid}>
+      {rows.map((badge) => {
+        const unlocked = Boolean(badge.unlocked);
+        return (
+          <View
+            key={badge.key}
+            style={[
+              styles.badgeCell,
+              {
+                backgroundColor: unlocked ? palette.accentMuted : palette.bgAlt,
+                borderColor: unlocked ? palette.accent : palette.line,
+                shadowColor: unlocked ? palette.accent : 'transparent',
+                opacity: unlocked ? 1 : 0.8,
+              },
+            ]}
+          >
+            <Text style={[styles.badgeCellTitle, { color: unlocked ? palette.accent : palette.textSecondary }]} numberOfLines={2}>{badge.title}</Text>
+            <Text style={[styles.badgeCellDesc, { color: palette.textSecondary }]} numberOfLines={3}>{badge.description}</Text>
+            <Text style={[styles.badgeCellState, { color: unlocked ? palette.accent2 : palette.muted }]}>{unlocked ? 'UNLOCKED' : 'LOCKED'}</Text>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
 export function ProfileScreen() {
   const { token, user } = useSession();
   const { t } = useI18n();
@@ -89,6 +184,9 @@ export function ProfileScreen() {
   const [players, setPlayers] = useState([]);
   const [records, setRecords] = useState(null);
   const [period, setPeriod] = useState('season');
+  const [badges, setBadges] = useState(BADGE_FALLBACK);
+  const [unlockQueue, setUnlockQueue] = useState([]);
+  const [activeUnlock, setActiveUnlock] = useState(null);
 
   const [view, setView] = useState('profile');
   const [refreshing, setRefreshing] = useState(false);
@@ -100,15 +198,42 @@ export function ProfileScreen() {
       api.listPlayers(token),
       api.records(token, user.id, period),
     ]);
+    const badgeOut = await api.badges(token, user.id);
     setDashboard(db);
     setDuos(duoStats);
     setPlayers(playerList);
     setRecords(recordsOut);
+    setBadges(Array.isArray(badgeOut?.catalog) && badgeOut.catalog.length ? badgeOut.catalog : BADGE_FALLBACK);
+    if (Array.isArray(badgeOut?.newlyUnlocked) && badgeOut.newlyUnlocked.length) {
+      setUnlockQueue((current) => {
+        const seen = new Set(current.map((entry) => `${entry.badgeKey}:${entry.unlockedAt}`));
+        const appended = badgeOut.newlyUnlocked
+          .filter((entry) => !seen.has(`${entry.badgeKey}:${entry.unlockedAt}`))
+          .map((entry) => ({
+            ...entry,
+            description: (badgeOut.catalog ?? BADGE_FALLBACK).find((item) => item.key === entry.badgeKey)?.description ?? '',
+          }));
+        return [...current, ...appended];
+      });
+    }
   }
 
   useEffect(() => {
     loadProfileData().catch(() => {});
   }, [token, user.id, period]);
+
+  useEffect(() => {
+    if (activeUnlock || unlockQueue.length === 0) {
+      return;
+    }
+    const next = unlockQueue[0];
+    setActiveUnlock(next);
+    setUnlockQueue((current) => current.slice(1));
+    const timer = setTimeout(() => {
+      setActiveUnlock(null);
+    }, 2600);
+    return () => clearTimeout(timer);
+  }, [activeUnlock, unlockQueue]);
 
   const playersById = useMemo(() => {
     const map = new Map();
@@ -258,6 +383,11 @@ export function ProfileScreen() {
       </Card>
 
       <Card>
+        <Text style={[styles.cardTitle, { color: palette.text }]}>Badges</Text>
+        <BadgeGrid catalog={badges} palette={palette} />
+      </Card>
+
+      <Card>
         <Text style={[styles.cardTitle, { color: palette.text }]}>{t('profile.heatmapTitle')}</Text>
         <Heatmap items={records?.activityHeatmap ?? dashboard?.activityHeatmap ?? []} palette={palette} />
       </Card>
@@ -265,6 +395,7 @@ export function ProfileScreen() {
       <Pressable style={[styles.cta, { backgroundColor: palette.accent }]} onPress={() => setView('partners')}>
         <Text style={[styles.ctaText, { color: palette.accentText }]}>{t('profile.seePartners')}</Text>
       </Pressable>
+      <BadgeUnlockOverlay badge={activeUnlock} palette={palette} />
     </ScrollView>
   );
 }
@@ -371,5 +502,90 @@ const styles = StyleSheet.create({
     height: 11,
     borderRadius: 3,
     borderWidth: 1,
+  },
+  badgeGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  badgeCell: {
+    width: '23%',
+    minHeight: 132,
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 7,
+    paddingVertical: 9,
+    justifyContent: 'space-between',
+    shadowOffset: { width: 0, height: 8 },
+    shadowRadius: 14,
+    shadowOpacity: 0.22,
+    elevation: 2,
+  },
+  badgeCellTitle: {
+    fontFamily: theme.fonts.title,
+    fontSize: 10,
+    letterSpacing: 0.35,
+    textTransform: 'uppercase',
+  },
+  badgeCellDesc: {
+    fontFamily: theme.fonts.body,
+    fontSize: 10,
+    lineHeight: 12,
+  },
+  badgeCellState: {
+    fontFamily: theme.fonts.title,
+    fontSize: 9,
+    letterSpacing: 0.5,
+  },
+  unlockOverlay: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    top: 10,
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    zIndex: 20,
+  },
+  unlockKicker: {
+    fontFamily: theme.fonts.title,
+    fontSize: 11,
+    letterSpacing: 1.2,
+  },
+  unlockTitle: {
+    marginTop: 4,
+    fontFamily: theme.fonts.display,
+    fontSize: 21,
+    lineHeight: 24,
+  },
+  unlockSub: {
+    marginTop: 3,
+    fontFamily: theme.fonts.body,
+    fontSize: 12,
+  },
+  sparkleA: {
+    position: 'absolute',
+    width: 8,
+    height: 8,
+    borderRadius: 99,
+    top: 9,
+    right: 18,
+  },
+  sparkleB: {
+    position: 'absolute',
+    width: 6,
+    height: 6,
+    borderRadius: 99,
+    top: 24,
+    right: 34,
+  },
+  sparkleC: {
+    position: 'absolute',
+    width: 5,
+    height: 5,
+    borderRadius: 99,
+    top: 17,
+    right: 50,
   },
 });

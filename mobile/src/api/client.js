@@ -139,6 +139,8 @@ export const api = {
     request(`/api/v1/stats/performance-holes/${encodeURIComponent(userId)}${toQuery({ period })}`, { token }),
   seasons: (token, city) =>
     request(`/api/v1/gamification/seasons${toQuery({ city })}`, { token }),
+  badges: (token, userId) =>
+    request(`/api/v1/gamification/badges/${encodeURIComponent(userId)}`, { token }),
   listings: (token, city) => request(`/api/v1/marketplace/listings?city=${encodeURIComponent(city)}`, { token }),
   createListing: (token, body) => request('/api/v1/marketplace/listings', { method: 'POST', token, body }),
 };
