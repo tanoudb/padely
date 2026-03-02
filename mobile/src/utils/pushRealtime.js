@@ -68,6 +68,7 @@ export function resolvePushRoute(data = {}) {
     || type === 'match_validated'
     || type === 'match_rejected'
     || type === 'player_invited'
+    || type === 'matchmaking_invite'
   ) {
     return {
       tab: friendId ? 'CommunityTab' : 'PlayTab',

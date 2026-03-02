@@ -43,6 +43,21 @@ function greetingLine(name, t) {
   return t('community.greetingEvening', { name: firstName });
 }
 
+function lastActiveLabel(iso, t) {
+  const ms = new Date(iso ?? '').getTime();
+  if (Number.isNaN(ms) || !ms) {
+    return t('community.matchmakingLastUnknown');
+  }
+  const days = Math.floor((Date.now() - ms) / 86_400_000);
+  if (days <= 0) {
+    return t('community.matchmakingLastToday');
+  }
+  if (days === 1) {
+    return t('community.matchmakingLastYesterday');
+  }
+  return t('community.matchmakingLastDays', { days });
+}
+
 function Avatar({ name, active = false }) {
   return (
     <View style={[styles.avatar, active && styles.avatarActive]}>
@@ -134,9 +149,11 @@ export function CommunityScreen() {
 
   const [crew, setCrew] = useState(null);
   const [players, setPlayers] = useState([]);
+  const [matchmakingSuggestions, setMatchmakingSuggestions] = useState([]);
   const [selectedFriend, setSelectedFriend] = useState('');
   const [dmMessages, setDmMessages] = useState([]);
   const [dmInput, setDmInput] = useState('');
+  const [proposeLoadingId, setProposeLoadingId] = useState('');
 
   const [selectedRegionalChannel, setSelectedRegionalChannel] = useState('');
   const [selectedChannel, setSelectedChannel] = useState('france');
@@ -155,6 +172,7 @@ export function CommunityScreen() {
   const [clubCode, setClubCode] = useState('');
   const [clubQrOpen, setClubQrOpen] = useState(false);
   const [error, setError] = useState('');
+  const [feedback, setFeedback] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [rankingPeriod, setRankingPeriod] = useState('season');
   const [localLeaderboard, setLocalLeaderboard] = useState([]);
@@ -230,6 +248,8 @@ export function CommunityScreen() {
       ]);
       setCrew(crewOut);
       setPlayers(playerPool.filter((p) => p.id !== user.id));
+      const suggestionsOut = await api.matchmakingSuggestions(token, { city, limit: 8 });
+      setMatchmakingSuggestions(suggestionsOut.suggestions ?? []);
 
       const regional = crewOut.regionalChannel?.key ?? '';
       const firstPublic = crewOut.publicChannels?.[0]?.key ?? 'france';
@@ -531,6 +551,24 @@ export function CommunityScreen() {
     }
   }
 
+  async function proposeMatch(playerId) {
+    if (!playerId || proposeLoadingId) return;
+    setProposeLoadingId(playerId);
+    try {
+      await api.proposeMatchmaking(token, { targetUserId: playerId });
+      setError('');
+      setFeedback(t('community.matchmakingProposed'));
+      await refreshCrew();
+      setSelectedFriend(playerId);
+      setActiveTab('home');
+    } catch (e) {
+      setError(e.message);
+      setFeedback('');
+    } finally {
+      setProposeLoadingId('');
+    }
+  }
+
   async function createChannel() {
     if (!newChannelName.trim()) return;
     try {
@@ -645,6 +683,7 @@ export function CommunityScreen() {
       </View>
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
+      {feedback ? <Text style={styles.feedback}>{feedback}</Text> : null}
 
       {activeTab === 'home' ? (
         <>
@@ -713,6 +752,40 @@ export function CommunityScreen() {
                   </Pressable>
                   <Pressable style={styles.addBtn} onPress={() => addFriend(p.id)}>
                     <Text style={styles.addBtnText}>{t('community.add')}</Text>
+                  </Pressable>
+                </View>
+              ))}
+            </Card>
+          ) : null}
+
+          {matchmakingSuggestions.length > 0 ? (
+            <Card>
+              <Text style={styles.sectionTitle}>{t('community.matchmakingTitle')}</Text>
+              <Text style={styles.emptyText}>{t('community.matchmakingPitch')}</Text>
+              {matchmakingSuggestions.map((suggestion) => (
+                <View key={suggestion.userId} style={styles.suggestRow}>
+                  <Pressable style={styles.suggestLeft} onPress={() => openPlayerProfile({ id: suggestion.userId, displayName: suggestion.displayName })}>
+                    <Avatar name={suggestion.displayName} />
+                    <View>
+                      <Text style={styles.suggestName}>{suggestion.displayName}</Text>
+                      <Text style={styles.suggestMeta}>
+                        {suggestion.city ?? t('community.unknownCity')}
+                        {' · '}
+                        PIR {Math.round(suggestion.rating ?? 0)}
+                        {' · '}
+                        {t('community.matchmakingCompat', { value: suggestion.compatibility ?? 0 })}
+                      </Text>
+                      <Text style={styles.suggestMeta}>{lastActiveLabel(suggestion.lastActiveAt, t)}</Text>
+                    </View>
+                  </Pressable>
+                  <Pressable
+                    style={styles.proposeBtn}
+                    onPress={() => proposeMatch(suggestion.userId)}
+                    disabled={proposeLoadingId === suggestion.userId}
+                  >
+                    <Text style={styles.addBtnText}>
+                      {proposeLoadingId === suggestion.userId ? t('community.matchmakingSending') : t('community.matchmakingPropose')}
+                    </Text>
                   </Pressable>
                 </View>
               ))}
@@ -1297,6 +1370,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 10,
   },
+  proposeBtn: {
+    minHeight: 32,
+    borderRadius: 8,
+    backgroundColor: '#8A6A24',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+  },
   addBtnText: {
     color: '#ECFFF9',
     fontFamily: theme.fonts.title,
@@ -1424,6 +1505,11 @@ const styles = StyleSheet.create({
   },
   error: {
     color: theme.colors.danger,
+    fontFamily: theme.fonts.body,
+    fontSize: 12,
+  },
+  feedback: {
+    color: theme.colors.accent2,
     fontFamily: theme.fonts.body,
     fontSize: 12,
   },

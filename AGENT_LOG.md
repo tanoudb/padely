@@ -168,3 +168,18 @@ Mobile: API `api.seasons()` (`mobile/src/api/client.js`), carte saison Home avec
 ✅
 ### Prochaine mission recommandée
 PARTAGE SOCIAL (image résultat) dès que la dépendance `react-native-view-shot` peut être installée
+
+## [2026-03-02] — Run #10
+### Mission
+MATCHMAKING INTELLIGENT
+### Résultat
+Les joueurs ont maintenant un vrai moteur “Trouver un match” : l’app propose des adversaires pertinents en 1 écran avec compatibilité %, activité récente et niveau proche.
+Le bouton “Proposer” déclenche une invitation réelle côté backend (DM persisté + ajout en ami) et une notification push ciblée, ce qui transforme la suggestion en mise en relation immédiate.
+### Technique
+Backend : nouveau service `backend/src/services/matchmakingService.js` (filtres stricts rating ±150, même ville, actif sur 7 jours, exclusion adversaires déjà joués cette semaine, scoring compatibilité 0-100), endpoints `GET /api/v1/community/matchmaking/suggestions` et `POST /api/v1/community/matchmaking/propose` ajoutés dans `backend/src/server.js`.
+Mobile : client API étendu (`mobile/src/api/client.js`), section “Trouver un match” intégrée dans `mobile/src/screens/CommunityScreen.js` (liste suggestions + CTA Proposer + état envoi + feedback), i18n FR/EN enrichi (`mobile/src/i18n/dictionaries.js`), routing push mis à jour pour `matchmaking_invite` (`mobile/src/utils/pushRealtime.js`).
+Tests : nouveau fichier `backend/test/matchmakingSuggestions.test.js` couvrant suggestions + proposition/push, suite backend complète verte (`32/32`).
+### Statut
+✅
+### Prochaine mission recommandée
+PARTAGE SOCIAL (image résultat premium + share sheet) dès que `react-native-view-shot` est installable

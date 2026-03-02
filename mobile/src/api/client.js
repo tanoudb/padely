@@ -93,6 +93,10 @@ export const api = {
   validateMatch: (token, matchId, accepted) => request(`/api/v1/matches/${matchId}/validate`, { method: 'POST', token, body: { accepted } }),
   createMatchInvite: (token, matchId) => request(`/api/v1/matches/${matchId}/invite`, { method: 'POST', token }),
   listPlayers: (token) => request('/api/v1/community/players?ratingMin=900&ratingMax=2400', { token }),
+  matchmakingSuggestions: (token, options = {}) =>
+    request(`/api/v1/community/matchmaking/suggestions${toQuery(options)}`, { token }),
+  proposeMatchmaking: (token, body) =>
+    request('/api/v1/community/matchmaking/propose', { method: 'POST', token, body }),
   leaderboard: (token, city) => request(`/api/v1/community/leaderboard?city=${encodeURIComponent(city)}`, { token }),
   leaderboardByPeriod: (token, city, period) => request(`/api/v1/community/leaderboard?city=${encodeURIComponent(city)}&period=${encodeURIComponent(period)}`, { token }),
   leaderboardPeriods: (token, city) => request(`/api/v1/community/leaderboard/periods?city=${encodeURIComponent(city)}`, { token }),

@@ -43,6 +43,10 @@ import {
   subscribeCommunityFeed,
 } from './services/communityService.js';
 import {
+  getMatchmakingSuggestions,
+  proposeMatchmakingInvite,
+} from './services/matchmakingService.js';
+import {
   evaluateBadges,
   runInactivityDecay,
   runSeasonSoftReset,
@@ -444,6 +448,24 @@ const server = http.createServer(async (req, res) => {
         lat: maybeNumber(url.searchParams.get('lat')),
         lng: maybeNumber(url.searchParams.get('lng')),
         radiusKm: Number(url.searchParams.get('radiusKm') ?? 25),
+      }));
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/v1/community/matchmaking/suggestions') {
+      const me = await requireAuth(req);
+      return json(res, 200, await getMatchmakingSuggestions(me.id, {
+        city: url.searchParams.get('city') ?? undefined,
+        limit: maybeNumber(url.searchParams.get('limit')),
+      }));
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/v1/community/matchmaking/propose') {
+      const me = await requireAuth(req);
+      const payload = await readJson(req);
+      return json(res, 201, await proposeMatchmakingInvite({
+        fromUserId: me.id,
+        targetUserId: payload.targetUserId,
+        message: payload.message,
       }));
     }
 
