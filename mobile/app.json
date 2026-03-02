@@ -31,7 +31,8 @@
           ]
         }
       ],
-      "expo-notifications"
+      "expo-notifications",
+      "expo-asset"
     ],
     "splash": {
       "image": "./assets/splash.png",

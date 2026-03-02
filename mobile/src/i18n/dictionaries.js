@@ -152,6 +152,8 @@ export const dictionaries = {
       seasonUnranked: 'Hors top',
       seasonDaysLeft: '{days} jours restants',
       lastSeasonBadge: 'Badge fin de saison: {badge}',
+      loadErrorTitle: 'Chargement impossible',
+      retry: 'Reessayer',
     },
     play: {
       boardKicker: 'TABLEAU DE SCORE',
@@ -339,6 +341,7 @@ export const dictionaries = {
       matchmakingPropose: 'Proposer',
       matchmakingSending: 'Envoi...',
       matchmakingProposed: 'Invitation envoyee. Verifie tes DM.',
+      authRequired: 'Connexion requise pour charger la communaute.',
     },
     profile: {
       space: 'ESPACE PERSONNEL',
@@ -555,6 +558,8 @@ export const dictionaries = {
       seasonUnranked: 'Unranked',
       seasonDaysLeft: '{days} days left',
       lastSeasonBadge: 'Last season badge: {badge}',
+      loadErrorTitle: 'Unable to load',
+      retry: 'Retry',
     },
     play: {
       boardKicker: 'LIVE SCOREBOARD',
@@ -742,6 +747,7 @@ export const dictionaries = {
       matchmakingPropose: 'Propose',
       matchmakingSending: 'Sending...',
       matchmakingProposed: 'Invite sent. Check your DMs.',
+      authRequired: 'Authentication required to load community.',
     },
     profile: {
       space: 'PERSONAL SPACE',

@@ -3,6 +3,7 @@ import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, Vie
 import { useIsFocused, useNavigation, useRoute } from '@react-navigation/native';
 import * as Location from 'expo-location';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { API_URL, api } from '../api/client';
 import { Card } from '../components/Card';
 import { QrScannerModal } from '../components/QrScannerModal';
@@ -136,6 +137,7 @@ function clubCodeFromQrValue(raw) {
 }
 
 export function CommunityScreen() {
+  const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const route = useRoute();
   const isFocused = useIsFocused();
@@ -632,14 +634,18 @@ export function CommunityScreen() {
     });
   }
 
+  const errorLabel = String(error ?? '').toLowerCase().includes('authentication')
+    ? t('community.authRequired')
+    : error;
+
   return (
     <ScrollView
       style={styles.root}
-      contentContainerStyle={styles.content}
+      contentContainerStyle={[styles.content, { paddingTop: Math.max(insets.top + 8, 24) }]}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.accent2} />}
     >
       <LinearGradient colors={['#163448', '#0C2333', '#081823']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
-        <Text style={styles.heroTitle}>{t('community.title')}</Text>
+        <Text style={styles.heroTitle} numberOfLines={1}>{t('community.title')}</Text>
         <Text style={styles.heroGreeting}>{greeting}</Text>
         <Text style={styles.heroPitch}>{t('community.pitch')}</Text>
 
@@ -682,7 +688,7 @@ export function CommunityScreen() {
         ))}
       </View>
 
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {errorLabel ? <Text style={styles.error}>{errorLabel}</Text> : null}
       {feedback ? <Text style={styles.feedback}>{feedback}</Text> : null}
 
       {activeTab === 'home' ? (

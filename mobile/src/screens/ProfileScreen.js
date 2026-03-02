@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -178,6 +179,7 @@ function BadgeGrid({ catalog, palette }) {
 }
 
 export function ProfileScreen() {
+  const insets = useSafeAreaInsets();
   const { token, user } = useSession();
   const { t } = useI18n();
   const { palette } = useUi();
@@ -187,6 +189,7 @@ export function ProfileScreen() {
   const [players, setPlayers] = useState([]);
   const [records, setRecords] = useState(null);
   const [period, setPeriod] = useState('season');
+  const [loadError, setLoadError] = useState('');
   const [badges, setBadges] = useState(BADGE_FALLBACK);
   const [unlockQueue, setUnlockQueue] = useState([]);
   const [activeUnlock, setActiveUnlock] = useState(null);
@@ -195,29 +198,34 @@ export function ProfileScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
   async function loadProfileData() {
-    const [db, duoStats, playerList, recordsOut] = await Promise.all([
-      api.dashboard(token, user.id, period),
-      api.duoStats(token, user.id, period),
-      api.listPlayers(token),
-      api.records(token, user.id, period),
-    ]);
-    const badgeOut = await api.badges(token, user.id);
-    setDashboard(db);
-    setDuos(duoStats);
-    setPlayers(playerList);
-    setRecords(recordsOut);
-    setBadges(Array.isArray(badgeOut?.catalog) && badgeOut.catalog.length ? badgeOut.catalog : BADGE_FALLBACK);
-    if (Array.isArray(badgeOut?.newlyUnlocked) && badgeOut.newlyUnlocked.length) {
-      setUnlockQueue((current) => {
-        const seen = new Set(current.map((entry) => `${entry.badgeKey}:${entry.unlockedAt}`));
-        const appended = badgeOut.newlyUnlocked
-          .filter((entry) => !seen.has(`${entry.badgeKey}:${entry.unlockedAt}`))
-          .map((entry) => ({
-            ...entry,
-            description: (badgeOut.catalog ?? BADGE_FALLBACK).find((item) => item.key === entry.badgeKey)?.description ?? '',
-          }));
-        return [...current, ...appended];
-      });
+    setLoadError('');
+    try {
+      const [db, duoStats, playerList, recordsOut] = await Promise.all([
+        api.dashboard(token, user.id, period),
+        api.duoStats(token, user.id, period),
+        api.listPlayers(token),
+        api.records(token, user.id, period),
+      ]);
+      const badgeOut = await api.badges(token, user.id);
+      setDashboard(db);
+      setDuos(duoStats);
+      setPlayers(playerList);
+      setRecords(recordsOut);
+      setBadges(Array.isArray(badgeOut?.catalog) && badgeOut.catalog.length ? badgeOut.catalog : BADGE_FALLBACK);
+      if (Array.isArray(badgeOut?.newlyUnlocked) && badgeOut.newlyUnlocked.length) {
+        setUnlockQueue((current) => {
+          const seen = new Set(current.map((entry) => `${entry.badgeKey}:${entry.unlockedAt}`));
+          const appended = badgeOut.newlyUnlocked
+            .filter((entry) => !seen.has(`${entry.badgeKey}:${entry.unlockedAt}`))
+            .map((entry) => ({
+              ...entry,
+              description: (badgeOut.catalog ?? BADGE_FALLBACK).find((item) => item.key === entry.badgeKey)?.description ?? '',
+            }));
+          return [...current, ...appended];
+        });
+      }
+    } catch (e) {
+      setLoadError(e.message || 'Impossible de charger le profil.');
     }
   }
 
@@ -287,14 +295,14 @@ export function ProfileScreen() {
     return (
       <ScrollView
         style={[styles.root, { backgroundColor: palette.bg }]}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, { paddingTop: Math.max(insets.top + 8, 24) }]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.accent2} />}
       >
         <View style={styles.headerRow}>
           <Pressable style={[styles.backBtn, { backgroundColor: palette.cardStrong }]} onPress={() => setView('profile')}>
             <Text style={[styles.backBtnText, { color: palette.text }]}>{t('profile.backProfile')}</Text>
           </Pressable>
-          <Text style={[styles.h1, { color: palette.text }]}>{t('profile.partnersTitle')}</Text>
+          <Text style={[styles.h1, { color: palette.text }]} numberOfLines={1}>{t('profile.partnersTitle')}</Text>
         </View>
 
         <Card elevated>
@@ -332,12 +340,12 @@ export function ProfileScreen() {
   return (
     <ScrollView
       style={[styles.root, { backgroundColor: palette.bg }]}
-      contentContainerStyle={styles.content}
+      contentContainerStyle={[styles.content, { paddingTop: Math.max(insets.top + 8, 24) }]}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.accent2} />}
     >
       <View style={styles.header}>
         <Text style={[styles.eyebrow, { color: palette.accent2 }]}>{t('profile.space')}</Text>
-        <Text style={[styles.h1, { color: palette.text }]}>{t('profile.title')}</Text>
+        <Text style={[styles.h1, { color: palette.text }]} numberOfLines={1}>{t('profile.title')}</Text>
         <Text style={[styles.pitch, { color: palette.textSecondary }]}>{t('profile.pitch')}</Text>
       </View>
 
@@ -362,7 +370,7 @@ export function ProfileScreen() {
         })}
       </View>
 
-      {isLoading ? (
+      {isLoading && !loadError ? (
         <>
           <Card elevated style={styles.identityCard}>
             <Skeleton width={72} height={72} radius={36} />
@@ -384,6 +392,14 @@ export function ProfileScreen() {
             <Skeleton width="100%" height={118} radius={14} style={{ marginTop: 10 }} />
           </Card>
         </>
+      ) : loadError ? (
+        <Card elevated>
+          <Text style={[styles.cardTitle, { color: palette.text }]}>{t('home.loadErrorTitle')}</Text>
+          <Text style={[styles.meta, { color: palette.textSecondary }]}>{loadError}</Text>
+          <Pressable style={[styles.cta, { backgroundColor: palette.accent, marginTop: 12 }]} onPress={onRefresh}>
+            <Text style={[styles.ctaText, { color: palette.accentText }]}>{t('home.retry')}</Text>
+          </Pressable>
+        </Card>
       ) : (
         <>
           <AnimatedView style={identityEntry}>

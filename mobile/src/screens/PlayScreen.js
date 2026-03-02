@@ -16,9 +16,12 @@ import {
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import * as Haptics from 'expo-haptics';
+import * as Sharing from 'expo-sharing';
 import { LinearGradient } from 'expo-linear-gradient';
+import ViewShot from 'react-native-view-shot';
 import { API_URL, api } from '../api/client';
 import { Card } from '../components/Card';
+import { MatchShareCard } from '../components/MatchShareCard';
 import { QrScannerModal } from '../components/QrScannerModal';
 import { VictoryOverlay } from '../components/VictoryOverlay';
 import { useI18n } from '../state/i18n';
@@ -113,6 +116,18 @@ function arcadeTagFromQrValue(raw) {
   }
 
   return value;
+}
+
+function parseUnlockedBadgeCatalog(payload) {
+  const catalog = Array.isArray(payload?.catalog) ? payload.catalog : [];
+  return catalog
+    .filter((item) => item?.unlocked)
+    .map((item) => ({
+      key: String(item.key ?? item.badgeKey ?? ''),
+      title: String(item.title ?? item.key ?? ''),
+      unlockedAt: item.unlockedAt ?? null,
+    }))
+    .filter((item) => item.key);
 }
 
 function MatchCard({ match, onValidate, onOpenPir, t }) {
@@ -270,6 +285,7 @@ export function PlayScreen() {
   const [savedInviteUrl, setSavedInviteUrl] = useState('');
   const [pirDetail, setPirDetail] = useState(null);
   const [victoryPirDelta, setVictoryPirDelta] = useState(0);
+  const [latestBadgeUnlocked, setLatestBadgeUnlocked] = useState(null);
   const [liveMatchId, setLiveMatchId] = useState('');
   const [joinLiveInput, setJoinLiveInput] = useState('');
   const [liveStatus, setLiveStatus] = useState('offline');
@@ -286,6 +302,8 @@ export function PlayScreen() {
   const ignoreNextLivePublishRef = useRef(false);
   const latestLiveSequenceRef = useRef(0);
   const lastPublishedPayloadRef = useRef('');
+  const shareCardRef = useRef(null);
+  const knownBadgeKeysRef = useRef(new Set());
 
   const selectablePlayers = useMemo(
     () => players.filter((p) => p.id !== user.id),
@@ -305,6 +323,29 @@ export function PlayScreen() {
     () => [user.id, ...selectedUsers],
     [user.id, selectedUsers],
   );
+  const playersById = useMemo(
+    () => new Map(players.map((player) => [player.id, player])),
+    [players],
+  );
+  const shareTeams = useMemo(() => {
+    const [teamA2, teamB1, teamB2] = selectedSlots;
+    const toLabel = (slot) => {
+      if (!slot) return 'Joueur';
+      if (typeof slot === 'string') {
+        if (slot === user.id) {
+          return user.displayName || 'Moi';
+        }
+        return playersById.get(slot)?.displayName || slot;
+      }
+      if (slot.kind === 'guest') {
+        return slot.guestName || 'Invite';
+      }
+      return slot.displayName || 'Joueur';
+    };
+    const teamA = [user.displayName || 'Moi', toLabel(teamA2)].filter(Boolean).join(' / ');
+    const teamB = [toLabel(teamB1), toLabel(teamB2)].filter(Boolean).join(' / ');
+    return { teamA, teamB };
+  }, [playersById, selectedSlots, user.displayName, user.id]);
 
   const displayPoints = getDisplayPoints(score);
   const currentServer = getCurrentServer(score);
@@ -369,6 +410,10 @@ export function PlayScreen() {
   useEffect(() => {
     refresh().catch((e) => setFeedback(e.message));
   }, []);
+
+  useEffect(() => {
+    syncBadgeUnlocks({ detectNew: false }).catch(() => {});
+  }, [token, user.id]);
 
   useEffect(() => {
     const cfg = scoreConfigFromPreferences(user.settings);
@@ -552,6 +597,7 @@ export function PlayScreen() {
         if (liveMatchId) {
           setLiveStatus('closed');
         }
+        await syncBadgeUnlocks({ detectNew: true });
         if (matchMode === 'ranked') {
           setFeedback(t('play.msgAutoSavedRanked', { id: out.id.slice(-6), suffix: inviteSuffix }));
         } else {
@@ -729,16 +775,52 @@ export function PlayScreen() {
     }
   }
 
-  async function shareInvite() {
-    if (!savedInviteUrl || !savedMatchId) {
+  async function syncBadgeUnlocks({ detectNew = false } = {}) {
+    try {
+      const payload = await api.badges(token, user.id);
+      const unlocked = parseUnlockedBadgeCatalog(payload);
+      const nextKeys = new Set(unlocked.map((item) => item.key));
+      if (detectNew) {
+        const previous = knownBadgeKeysRef.current;
+        const fresh = unlocked
+          .filter((item) => !previous.has(item.key))
+          .sort((a, b) => String(b.unlockedAt ?? '').localeCompare(String(a.unlockedAt ?? '')));
+        setLatestBadgeUnlocked(fresh[0] ?? null);
+      }
+      knownBadgeKeysRef.current = nextKeys;
+    } catch {
+      // Badge sync is best-effort and never blocks match UX.
+    }
+  }
+
+  async function shareResultCard() {
+    if (!savedMatchId) {
       setFeedback(t('play.msgNoShareLink'));
       return;
     }
     try {
-      await Share.share({
-        message: t('play.shareInviteMessage', { url: savedInviteUrl }),
-        title: t('play.shareInviteTitle', { id: savedMatchId.slice(-6) }),
-      });
+      const uri = await shareCardRef.current?.capture?.();
+      if (!uri) {
+        throw new Error('capture_unavailable');
+      }
+
+      const shareText = savedInviteUrl
+        ? t('play.shareInviteMessage', { url: savedInviteUrl })
+        : `Padely match result #${savedMatchId.slice(-6)}`;
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, {
+          mimeType: 'image/png',
+          dialogTitle: t('play.shareInviteTitle', { id: savedMatchId.slice(-6) }),
+          UTI: 'public.png',
+        });
+      } else {
+        await Share.share({
+          title: t('play.shareInviteTitle', { id: savedMatchId.slice(-6) }),
+          message: shareText,
+          url: uri,
+        });
+      }
     } catch (e) {
       setFeedback(t('play.msgShareUnavailable', { error: e.message }));
     }
@@ -790,6 +872,7 @@ export function PlayScreen() {
       if (liveMatchId) {
         setLiveStatus('closed');
       }
+      await syncBadgeUnlocks({ detectNew: true });
       await refresh();
     } catch (e) {
       setFeedback(e.message);
@@ -812,6 +895,7 @@ export function PlayScreen() {
     setSavedMatchId(null);
     setSavedInviteUrl('');
     setVictoryPirDelta(0);
+    setLatestBadgeUnlocked(null);
     setLiveMatchId('');
     setLiveStatus('offline');
     setJoinLiveInput('');
@@ -1167,6 +1251,23 @@ export function PlayScreen() {
         </SafeAreaView>
       </Modal>
 
+      <View style={styles.shareCaptureLayer} pointerEvents="none">
+        <ViewShot
+          ref={shareCardRef}
+          options={{ format: 'png', quality: 1, result: 'tmpfile', width: 1080, height: 1350 }}
+          style={styles.shareCaptureShot}
+        >
+          <MatchShareCard
+            matchId={savedMatchId}
+            scoreLine={setsPayload.map((set) => `${set.a}-${set.b}`).join(' / ')}
+            teamALabel={shareTeams.teamA}
+            teamBLabel={shareTeams.teamB}
+            pirDelta={victoryPirDelta}
+            badgeTitle={latestBadgeUnlocked?.title ?? ''}
+          />
+        </ViewShot>
+      </View>
+
       <VictoryOverlay
         visible={Boolean(score.winner)}
         title={winnerTone ? t(winnerTone.titleKey) : t('play.victoryDefault')}
@@ -1179,7 +1280,7 @@ export function PlayScreen() {
         pirValue={Number(user.pir ?? 0) + Number(victoryPirDelta ?? 0)}
         rankLabel={user.rankName ?? 'Classement'}
         isVictory={score.winner === 'a'}
-        onShare={savedInviteUrl ? shareInvite : undefined}
+        onShare={savedMatchId ? shareResultCard : undefined}
         shareLabel={t('play.share')}
         replayLabel={t('play.replay')}
         homeLabel={t('play.home')}
@@ -1236,6 +1337,16 @@ export function PlayScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: 'transparent' },
   content: { padding: 16, gap: 12, paddingBottom: 24 },
+  shareCaptureLayer: {
+    position: 'absolute',
+    left: -2400,
+    top: -2400,
+    opacity: 0,
+  },
+  shareCaptureShot: {
+    width: 1080,
+    height: 1350,
+  },
   header: { marginBottom: 4 },
   eyebrow: { color: theme.colors.accent2, fontFamily: theme.fonts.mono, letterSpacing: 1, fontSize: 11 },
   h1: { color: theme.colors.text, fontSize: 40, lineHeight: 42, fontFamily: theme.fonts.display },

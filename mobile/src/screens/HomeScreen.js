@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { api } from '../api/client';
 import { Card } from '../components/Card';
@@ -69,6 +70,7 @@ function countStreakDays(matches) {
 
 export function HomeScreen() {
   const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
   const { token, user, logout, updateSettings } = useSession();
   const { mode, setMode, palette } = useUi();
   const { language, setLanguage, t } = useI18n();
@@ -77,6 +79,7 @@ export function HomeScreen() {
   const [recentMatches, setRecentMatches] = useState([]);
   const [cityLeaderboards, setCityLeaderboards] = useState(null);
   const [seasons, setSeasons] = useState(null);
+  const [loadError, setLoadError] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -114,16 +117,21 @@ export function HomeScreen() {
   }
 
   const loadHome = useCallback(async () => {
-    const [dash, periods, matchesOut, seasonsOut] = await Promise.all([
-      api.dashboard(token, user.id),
-      api.leaderboardPeriods(token, user.city ?? 'Lyon'),
-      api.listMyMatches(token),
-      api.seasons(token, user.city ?? 'Lyon'),
-    ]);
-    setDashboard(dash);
-    setCityLeaderboards(periods);
-    setRecentMatches(matchesOut);
-    setSeasons(seasonsOut);
+    setLoadError('');
+    try {
+      const [dash, periods, matchesOut, seasonsOut] = await Promise.all([
+        api.dashboard(token, user.id),
+        api.leaderboardPeriods(token, user.city ?? 'Lyon'),
+        api.listMyMatches(token),
+        api.seasons(token, user.city ?? 'Lyon'),
+      ]);
+      setDashboard(dash);
+      setCityLeaderboards(periods);
+      setRecentMatches(matchesOut);
+      setSeasons(seasonsOut);
+    } catch (e) {
+      setLoadError(e.message || 'Impossible de charger les donnees.');
+    }
   }, [token, user.id, user.city]);
 
   useEffect(() => {
@@ -229,11 +237,11 @@ export function HomeScreen() {
     <>
       <ScrollView
         style={styles.root}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, { paddingTop: Math.max(insets.top + 8, 24) }]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.accent2} />}
       >
         <View style={styles.headerRow}>
-          <Text style={[styles.h1, { color: palette.text }]}>{t('home.hello', { name: user.displayName })}</Text>
+          <Text numberOfLines={1} style={[styles.h1, { color: palette.text }]}>{t('home.hello', { name: user.displayName })}</Text>
           <Pressable style={[styles.gearBtn, { backgroundColor: palette.cardStrong, borderColor: palette.line }]} onPress={() => setSettingsOpen(true)}>
             <Svg width={20} height={20} viewBox="0 0 24 24">
               <Path
@@ -247,7 +255,7 @@ export function HomeScreen() {
           </Pressable>
         </View>
 
-        {isLoading ? (
+        {isLoading && !loadError ? (
           <>
             <Card elevated style={styles.heroCard}>
               <Skeleton width={120} height={12} />
@@ -275,6 +283,14 @@ export function HomeScreen() {
               <Skeleton width={130} height={10} style={{ marginTop: 8 }} />
             </Card>
           </>
+        ) : loadError ? (
+          <Card elevated>
+            <Text style={[styles.sectionTitle, { color: palette.text }]}>Connexion API</Text>
+            <Text style={[styles.empty, { color: palette.warning }]}>{loadError}</Text>
+            <Pressable style={[styles.quickBtnPrimary, { backgroundColor: palette.accent, marginTop: 10 }]} onPress={onRefresh}>
+              <Text style={styles.quickBtnPrimaryText}>Reessayer</Text>
+            </Pressable>
+          </Card>
         ) : (
           <>
             <AnimatedView style={heroEntry}>

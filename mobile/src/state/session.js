@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { api } from '../api/client';
+import { ApiError, api } from '../api/client';
 
 const SessionContext = createContext(null);
 const SESSION_STORAGE_KEY = 'padely.session.v1';
@@ -40,6 +40,31 @@ export function SessionProvider({ children }) {
     const payload = JSON.stringify({ token, user, pendingVerification });
     AsyncStorage.setItem(SESSION_STORAGE_KEY, payload).catch(() => {});
   }, [token, user, pendingVerification, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    if (!token && user) {
+      setUser(null);
+    }
+  }, [hydrated, token, user]);
+
+  function isUnauthorizedError(error) {
+    if (error instanceof ApiError && error.status === 401) {
+      return true;
+    }
+    const msg = String(error?.message ?? '').toLowerCase();
+    return msg.includes('authentication required')
+      || msg.includes('unauthorized')
+      || msg.includes('missing auth token')
+      || msg.includes('invalid token');
+  }
+
+  function hardLogout() {
+    setToken('');
+    setUser(null);
+    setPendingVerification(null);
+    AsyncStorage.removeItem(SESSION_STORAGE_KEY).catch(() => {});
+  }
 
   const value = useMemo(() => ({
     token,
@@ -137,24 +162,37 @@ export function SessionProvider({ children }) {
     },
     async refreshProfile() {
       if (!token) return null;
-      const profile = await api.profile(token);
-      setUser(profile);
-      return profile;
+      try {
+        const profile = await api.profile(token);
+        setUser(profile);
+        return profile;
+      } catch (error) {
+        if (isUnauthorizedError(error)) {
+          hardLogout();
+          return null;
+        }
+        throw error;
+      }
     },
     async updateSettings(settingsPayload) {
       if (!token) {
         throw new Error('Session invalide');
       }
-      const profile = await api.updateSettings(token, settingsPayload);
-      setUser(profile);
-      return profile;
+      try {
+        const profile = await api.updateSettings(token, settingsPayload);
+        setUser(profile);
+        return profile;
+      } catch (error) {
+        if (isUnauthorizedError(error)) {
+          hardLogout();
+          throw new Error('Session expiree. Reconnecte-toi.');
+        }
+        throw error;
+      }
     },
     setUser,
     logout() {
-      setToken('');
-      setUser(null);
-      setPendingVerification(null);
-      AsyncStorage.removeItem(SESSION_STORAGE_KEY).catch(() => {});
+      hardLogout();
     },
   }), [token, user, pendingVerification, hydrated, setUser]);
 

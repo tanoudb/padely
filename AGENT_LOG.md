@@ -283,3 +283,17 @@ Validation build: exports Expo iOS et Android réussis.
 ✅
 ### Prochaine mission recommandée
 PARTAGE SOCIAL (image résultat premium + share sheet) dès que la dépendance capture image est installable hors mode offline
+
+## [2026-03-02] — Run #18
+### Mission
+PARTAGE SOCIAL
+### Résultat
+Le partage de fin de match est maintenant visuel et premium: depuis l’overlay de victoire, le joueur partage une vraie carte résultat noire/or avec score, équipes, delta PIR et badge débloqué.
+Le partage utilise une image PNG générée dans l’app (plus un simple texte), et conserve le lien d’invitation dans le message quand il est disponible.
+### Technique
+Mobile: nouveau composant `mobile/src/components/MatchShareCard.js` (template share noir/or capturable), refonte du flux partage dans `mobile/src/screens/PlayScreen.js` (capture `react-native-view-shot`, partage natif `expo-sharing`, fallback `Share`, enrichissement badge via `api.badges`, wiring avec `VictoryOverlay`).
+Validation: backend tests OK `36/36` (`npm test`), exports Expo iOS et Android réussis (`npx expo export --platform ios|android`).
+### Statut
+✅
+### Prochaine mission recommandée
+REFONTE PROFIL (avatar/radar PIR DNA/stats compactes) pour aligner le dernier grand écran premium
