@@ -226,3 +226,16 @@ Tests: nouveau `backend/test/badgeSystem.test.js` (unlock auto après validation
 ✅
 ### Prochaine mission recommandée
 PARTAGE SOCIAL (image de résultat noir/or + share sheet) dès que `react-native-view-shot` est installable
+
+## [2026-03-02] — Run #14
+### Mission
+SKELETON + EMPTY STATES + ANIMATIONS
+### Résultat
+L’application est maintenant beaucoup plus premium et lisible en état réel: les écrans Home, Profil et Résultat ne “flashent” plus à froid, ils affichent des skeletons animés puis des entrées progressives fluides.
+Quand les données sont vides (classement, partenaires, badges, heatmap, résultat sans contexte), les joueurs voient des empty states visuels clairs au lieu de blocs bruts, ce qui améliore fortement la perception produit.
+### Technique
+Nouveaux briques UI/animation: `mobile/src/hooks/usePadelyAnimations.js` (`useStaggeredEntry`, `useScaleBounce`, `useCountUp`, `usePulseLoop`), `mobile/src/components/Skeleton.js`, `mobile/src/components/EmptyState.js`. Intégration complète dans `mobile/src/screens/HomeScreen.js` (loading skeleton, leaderboard empty state, count-up PIR/rating, entrées staggered), `mobile/src/screens/ProfileScreen.js` (skeleton loading, empty states partenaires/badges/heatmap, count-up PIR/rating, CTA animé), `mobile/src/screens/play/PlayResultScreen.js` (fallback empty state, skeleton save, count-up PIR/delta, bounce CTA). Nouvelles traductions FR/EN ajoutées dans `mobile/src/i18n/dictionaries.js`.
+### Statut
+✅
+### Prochaine mission recommandée
+PARTAGE SOCIAL (image de résultat premium + share sheet), dès que la dépendance capture (`react-native-view-shot`) est installable

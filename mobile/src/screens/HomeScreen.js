@@ -13,11 +13,14 @@ import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { api } from '../api/client';
 import { Card } from '../components/Card';
+import { EmptyState } from '../components/EmptyState';
 import { LeaderboardRow } from '../components/LeaderboardRow';
 import { PirGauge } from '../components/PirGauge';
 import { PirSparkline } from '../components/PirSparkline';
 import { RankBadge } from '../components/RankBadge';
+import { Skeleton } from '../components/Skeleton';
 import { StatPill } from '../components/StatPill';
+import { AnimatedView, useCountUp, useStaggeredEntry } from '../hooks/usePadelyAnimations';
 import { useI18n } from '../state/i18n';
 import { useSession } from '../state/session';
 import { useUi } from '../state/ui';
@@ -170,6 +173,17 @@ export function HomeScreen() {
     value: Number(point.pir ?? point.rating ?? 0),
   }));
   const lastDelta = Number(progression.at(-1)?.delta ?? 0);
+  const isLoading = !dashboard && !cityLeaderboards && !seasons;
+  const pirLive = useCountUp(pir);
+  const ratingLive = useCountUp(rating);
+  const choiceActiveStyle = { backgroundColor: palette.accent, borderColor: palette.accent };
+  const choiceActiveTextStyle = { color: palette.accentText };
+  const heroEntry = useStaggeredEntry(0, !isLoading);
+  const actionsEntry = useStaggeredEntry(1, !isLoading);
+  const boardEntry = useStaggeredEntry(2, !isLoading);
+  const seasonEntry = useStaggeredEntry(3, !isLoading);
+  const focusEntry = useStaggeredEntry(4, !isLoading);
+  const logoutEntry = useStaggeredEntry(5, !isLoading);
 
   async function onRefresh() {
     setRefreshing(true);
@@ -234,82 +248,125 @@ export function HomeScreen() {
           </Pressable>
         </View>
 
-        <Card elevated style={styles.heroCard}>
-          <View style={styles.heroHead}>
-            <Text style={[styles.eyebrow, { color: palette.accent2 }]}>{t('home.pirLive')}</Text>
-            <RankBadge rank={rankFromRating(rating)} />
-          </View>
+        {isLoading ? (
+          <>
+            <Card elevated style={styles.heroCard}>
+              <Skeleton width={120} height={12} />
+              <Skeleton width="100%" height={180} radius={16} />
+              <Skeleton width="100%" height={42} radius={14} />
+            </Card>
+            <Card elevated>
+              <Skeleton width={180} height={12} />
+              <View style={styles.quickRow}>
+                <Skeleton width="49%" height={52} radius={14} />
+                <Skeleton width="49%" height={52} radius={14} />
+              </View>
+            </Card>
+            <Card>
+              <Skeleton width={180} height={12} />
+              <View style={styles.boardRows}>
+                <Skeleton width="100%" height={44} />
+                <Skeleton width="100%" height={44} />
+                <Skeleton width="100%" height={44} />
+              </View>
+            </Card>
+            <Card elevated>
+              <Skeleton width={200} height={12} />
+              <Skeleton width="100%" height={12} style={{ marginTop: 10 }} />
+              <Skeleton width={130} height={10} style={{ marginTop: 8 }} />
+            </Card>
+          </>
+        ) : (
+          <>
+            <AnimatedView style={heroEntry}>
+              <Card elevated style={styles.heroCard}>
+                <View style={styles.heroHead}>
+                  <Text style={[styles.eyebrow, { color: palette.accent2 }]}>{t('home.pirLive')}</Text>
+                  <RankBadge rank={rankFromRating(rating)} />
+                </View>
+                <Text style={[styles.heroMetric, { color: palette.text }]}>{`PIR ${pirLive} · ${t('home.heroRank', { rank: rankFromRating(rating), rating: ratingLive })}`}</Text>
+                <PirGauge pir={pir} delta={lastDelta} rank={rankFromRating(rating)} />
+                <PirSparkline data={pirHistory} />
+                <View style={styles.pillsRow}>
+                  <StatPill value={wins} label={t('home.wins')} />
+                  <StatPill value={`${winRate}%`} label={t('home.winRate')} highlight />
+                  <StatPill value={`🔥 ${streakDays}`} label={t('home.streak')} />
+                </View>
+              </Card>
+            </AnimatedView>
 
-          <PirGauge pir={pir} delta={lastDelta} rank={rankFromRating(rating)} />
-          <PirSparkline data={pirHistory} />
+            <AnimatedView style={actionsEntry}>
+              <Card elevated>
+                <Text style={[styles.sectionTitle, { color: palette.text }]}>{t('home.launchTitle')}</Text>
+                <View style={styles.quickRow}>
+                  <Pressable style={[styles.quickBtnPrimary, { backgroundColor: palette.accent }]} onPress={goPlaySetup}>
+                    <Text style={[styles.quickBtnPrimaryText, { color: palette.accentText }]}>{t('home.launchRanked')}</Text>
+                  </Pressable>
+                  <Pressable style={[styles.quickBtnGhost, { borderColor: palette.line, backgroundColor: palette.chip }]} onPress={goCommunity}>
+                    <Text style={[styles.quickBtnGhostText, { color: palette.text }]}>{t('home.launchFind')}</Text>
+                  </Pressable>
+                </View>
+              </Card>
+            </AnimatedView>
 
-          <View style={styles.pillsRow}>
-            <StatPill value={wins} label={t('home.wins')} />
-            <StatPill value={`${winRate}%`} label={t('home.winRate')} highlight />
-            <StatPill value={`🔥 ${streakDays}`} label={t('home.streak')} />
-          </View>
-        </Card>
+            <AnimatedView style={boardEntry}>
+              <Card>
+                <Text style={[styles.sectionTitle, { color: palette.text }]}>{t('home.cityRanking', { city: user.city ?? 'Lyon' })}</Text>
+                <View style={styles.boardRows}>
+                  {topRows.map((row) => (
+                    <LeaderboardRow key={row.userId} row={row} podium onPress={openPlayerProfile} />
+                  ))}
+                  {topRows.length === 0 ? (
+                    <EmptyState title={t('home.emptyBoardTitle')} body={t('home.emptyBoardBody')} compact />
+                  ) : null}
+                </View>
+              </Card>
+            </AnimatedView>
 
-        <Card elevated>
-          <Text style={[styles.sectionTitle, { color: palette.text }]}>{t('home.launchTitle')}</Text>
-          <View style={styles.quickRow}>
-            <Pressable style={[styles.quickBtnPrimary, { backgroundColor: palette.accent }]} onPress={goPlaySetup}>
-              <Text style={styles.quickBtnPrimaryText}>{t('home.launchRanked')}</Text>
-            </Pressable>
-            <Pressable style={[styles.quickBtnGhost, { borderColor: palette.line, backgroundColor: palette.chip }]} onPress={goCommunity}>
-              <Text style={[styles.quickBtnGhostText, { color: palette.text }]}>{t('home.launchFind')}</Text>
-            </Pressable>
-          </View>
-        </Card>
+            <AnimatedView style={seasonEntry}>
+              <Card elevated>
+                <View style={styles.seasonHead}>
+                  <Text style={[styles.sectionTitle, { color: palette.text }]}>{t('home.seasonTitle', { label: seasonLabel })}</Text>
+                  <Text style={[styles.seasonRank, { color: palette.accent }]}>
+                    {seasonRank ? t('home.seasonRank', { rank: seasonRank }) : t('home.seasonUnranked')}
+                  </Text>
+                </View>
+                <View style={[styles.seasonBarTrack, { backgroundColor: palette.bgAlt, borderColor: palette.line }]}>
+                  <View style={[styles.seasonBarFill, { width: `${Math.max(3, Math.min(100, seasonProgress * 100))}%`, backgroundColor: palette.accent }]} />
+                </View>
+                <Text style={[styles.seasonMeta, { color: palette.textSecondary ?? palette.muted }]}>
+                  {t('home.seasonDaysLeft', { days: seasonDaysRemaining })}
+                </Text>
+                {lastSeasonBadge ? (
+                  <Text style={[styles.seasonBadge, { color: palette.accent2 }]}>
+                    {t('home.lastSeasonBadge', { badge: lastSeasonBadge })}
+                  </Text>
+                ) : null}
+              </Card>
+            </AnimatedView>
 
-        <Card>
-          <Text style={[styles.sectionTitle, { color: palette.text }]}>{t('home.cityRanking', { city: user.city ?? 'Lyon' })}</Text>
-          <View style={styles.boardRows}>
-            {topRows.map((row) => (
-              <LeaderboardRow key={row.userId} row={row} podium onPress={openPlayerProfile} />
-            ))}
-            {topRows.length === 0 ? (
-              <Text style={[styles.empty, { color: palette.muted }]}>Aucune donnee de classement.</Text>
-            ) : null}
-          </View>
-        </Card>
+            <AnimatedView style={focusEntry}>
+              <LinearGradient
+                colors={mode === 'day' ? ['#FFF4D6', '#F7FAFF'] : ['#153348', '#10283A']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={[styles.motivation, { borderColor: palette.line }]}
+              >
+                <Text style={[styles.sectionTitle, { color: palette.text }]}>{t('home.coachingFocus')}</Text>
+                <Text style={[styles.motivationText, { color: palette.muted }]}>{motivationalMessage}</Text>
+                <Text style={[styles.motivationMeta, { color: palette.text }]}>
+                  {t('home.monthlyGoalBody', { points: Math.max(0, 1500 - Math.round(rating)) })}
+                </Text>
+              </LinearGradient>
+            </AnimatedView>
 
-        <Card elevated>
-          <View style={styles.seasonHead}>
-            <Text style={[styles.sectionTitle, { color: palette.text }]}>{t('home.seasonTitle', { label: seasonLabel })}</Text>
-            <Text style={[styles.seasonRank, { color: palette.accent }]}>
-              {seasonRank ? t('home.seasonRank', { rank: seasonRank }) : t('home.seasonUnranked')}
-            </Text>
-          </View>
-          <View style={[styles.seasonBarTrack, { backgroundColor: palette.bgAlt, borderColor: palette.line }]}>
-            <View style={[styles.seasonBarFill, { width: `${Math.max(3, Math.min(100, seasonProgress * 100))}%`, backgroundColor: palette.accent }]} />
-          </View>
-          <Text style={[styles.seasonMeta, { color: palette.textSecondary ?? palette.muted }]}>
-            {t('home.seasonDaysLeft', { days: seasonDaysRemaining })}
-          </Text>
-          {lastSeasonBadge ? (
-            <Text style={[styles.seasonBadge, { color: palette.accent2 }]}>
-              {t('home.lastSeasonBadge', { badge: lastSeasonBadge })}
-            </Text>
-          ) : null}
-        </Card>
-
-        <LinearGradient
-          colors={mode === 'day' ? ['#FFF4D6', '#F7FAFF'] : ['#153348', '#10283A']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={[styles.motivation, { borderColor: palette.line }]}
-        >
-          <Text style={[styles.sectionTitle, { color: palette.text }]}>{t('home.coachingFocus')}</Text>
-          <Text style={[styles.motivationText, { color: palette.muted }]}>{motivationalMessage}</Text>
-          <Text style={[styles.motivationMeta, { color: palette.text }]}>
-            {t('home.monthlyGoalBody', { points: Math.max(0, 1500 - Math.round(rating)) })}
-          </Text>
-        </LinearGradient>
-
-        <Pressable style={[styles.logout, { backgroundColor: palette.cardStrong, borderColor: palette.line }]} onPress={logout}>
-          <Text style={[styles.logoutLabel, { color: palette.text }]}>{t('home.logout')}</Text>
-        </Pressable>
+            <AnimatedView style={logoutEntry}>
+              <Pressable style={[styles.logout, { backgroundColor: palette.cardStrong, borderColor: palette.line }]} onPress={logout}>
+                <Text style={[styles.logoutLabel, { color: palette.text }]}>{t('home.logout')}</Text>
+              </Pressable>
+            </AnimatedView>
+          </>
+        )}
       </ScrollView>
 
       <Modal visible={settingsOpen} transparent animationType="fade" onRequestClose={() => setSettingsOpen(false)}>
@@ -320,16 +377,16 @@ export function HomeScreen() {
             <Text style={[styles.modalLabel, { color: palette.muted }]}>{t('home.pointRule')}</Text>
             <View style={styles.choiceRow}>
               <Pressable
-                style={[styles.choiceBtn, { borderColor: palette.line, backgroundColor: palette.chip }, pointRule === 'punto_de_oro' && styles.choiceBtnActive]}
+                style={[styles.choiceBtn, { borderColor: palette.line, backgroundColor: palette.chip }, pointRule === 'punto_de_oro' && choiceActiveStyle]}
                 onPress={() => setPointRule('punto_de_oro')}
               >
-                <Text style={[styles.choiceText, { color: palette.text }, pointRule === 'punto_de_oro' && styles.choiceTextActive]}>{t('home.pointPunto')}</Text>
+                <Text style={[styles.choiceText, { color: palette.text }, pointRule === 'punto_de_oro' && choiceActiveTextStyle]}>{t('home.pointPunto')}</Text>
               </Pressable>
               <Pressable
-                style={[styles.choiceBtn, { borderColor: palette.line, backgroundColor: palette.chip }, pointRule === 'avantage' && styles.choiceBtnActive]}
+                style={[styles.choiceBtn, { borderColor: palette.line, backgroundColor: palette.chip }, pointRule === 'avantage' && choiceActiveStyle]}
                 onPress={() => setPointRule('avantage')}
               >
-                <Text style={[styles.choiceText, { color: palette.text }, pointRule === 'avantage' && styles.choiceTextActive]}>{t('home.pointAdv')}</Text>
+                <Text style={[styles.choiceText, { color: palette.text }, pointRule === 'avantage' && choiceActiveTextStyle]}>{t('home.pointAdv')}</Text>
               </Pressable>
             </View>
 
@@ -342,10 +399,10 @@ export function HomeScreen() {
               ].map((item) => (
                 <Pressable
                   key={item.key}
-                  style={[styles.choiceBtnWide, { borderColor: palette.line, backgroundColor: palette.chip }, matchFormat === item.key && styles.choiceBtnActive]}
+                  style={[styles.choiceBtnWide, { borderColor: palette.line, backgroundColor: palette.chip }, matchFormat === item.key && choiceActiveStyle]}
                   onPress={() => setMatchFormat(item.key)}
                 >
-                  <Text style={[styles.choiceText, { color: palette.text }, matchFormat === item.key && styles.choiceTextActive]}>{item.label}</Text>
+                  <Text style={[styles.choiceText, { color: palette.text }, matchFormat === item.key && choiceActiveTextStyle]}>{item.label}</Text>
                 </Pressable>
               ))}
             </View>
@@ -353,48 +410,48 @@ export function HomeScreen() {
             <Text style={[styles.modalLabel, { color: palette.muted }]}>{t('home.modeDefault')}</Text>
             <View style={styles.choiceRow}>
               <Pressable
-                style={[styles.choiceBtn, { borderColor: palette.line, backgroundColor: palette.chip }, defaultMatchMode === 'ranked' && styles.choiceBtnActive]}
+                style={[styles.choiceBtn, { borderColor: palette.line, backgroundColor: palette.chip }, defaultMatchMode === 'ranked' && choiceActiveStyle]}
                 onPress={() => setDefaultMatchMode('ranked')}
               >
-                <Text style={[styles.choiceText, { color: palette.text }, defaultMatchMode === 'ranked' && styles.choiceTextActive]}>{t('home.ranked')}</Text>
+                <Text style={[styles.choiceText, { color: palette.text }, defaultMatchMode === 'ranked' && choiceActiveTextStyle]}>{t('home.ranked')}</Text>
               </Pressable>
               <Pressable
-                style={[styles.choiceBtn, { borderColor: palette.line, backgroundColor: palette.chip }, defaultMatchMode === 'friendly' && styles.choiceBtnActive]}
+                style={[styles.choiceBtn, { borderColor: palette.line, backgroundColor: palette.chip }, defaultMatchMode === 'friendly' && choiceActiveStyle]}
                 onPress={() => setDefaultMatchMode('friendly')}
               >
-                <Text style={[styles.choiceText, { color: palette.text }, defaultMatchMode === 'friendly' && styles.choiceTextActive]}>{t('home.friendly')}</Text>
+                <Text style={[styles.choiceText, { color: palette.text }, defaultMatchMode === 'friendly' && choiceActiveTextStyle]}>{t('home.friendly')}</Text>
               </Pressable>
             </View>
 
             <Text style={[styles.modalLabel, { color: palette.muted }]}>{t('home.appearance')}</Text>
             <View style={styles.choiceRow}>
               <Pressable
-                style={[styles.choiceBtn, { borderColor: palette.line, backgroundColor: palette.chip }, appearanceMode === 'night' && styles.choiceBtnActive]}
+                style={[styles.choiceBtn, { borderColor: palette.line, backgroundColor: palette.chip }, appearanceMode === 'night' && choiceActiveStyle]}
                 onPress={() => setAppearanceMode('night')}
               >
-                <Text style={[styles.choiceText, { color: palette.text }, appearanceMode === 'night' && styles.choiceTextActive]}>{t('home.night')}</Text>
+                <Text style={[styles.choiceText, { color: palette.text }, appearanceMode === 'night' && choiceActiveTextStyle]}>{t('home.night')}</Text>
               </Pressable>
               <Pressable
-                style={[styles.choiceBtn, { borderColor: palette.line, backgroundColor: palette.chip }, appearanceMode === 'day' && styles.choiceBtnActive]}
+                style={[styles.choiceBtn, { borderColor: palette.line, backgroundColor: palette.chip }, appearanceMode === 'day' && choiceActiveStyle]}
                 onPress={() => setAppearanceMode('day')}
               >
-                <Text style={[styles.choiceText, { color: palette.text }, appearanceMode === 'day' && styles.choiceTextActive]}>{t('home.day')}</Text>
+                <Text style={[styles.choiceText, { color: palette.text }, appearanceMode === 'day' && choiceActiveTextStyle]}>{t('home.day')}</Text>
               </Pressable>
             </View>
 
             <Text style={[styles.modalLabel, { color: palette.muted }]}>{t('home.language')}</Text>
             <View style={styles.choiceRow}>
               <Pressable
-                style={[styles.choiceBtn, { borderColor: palette.line, backgroundColor: palette.chip }, languageChoice === 'fr' && styles.choiceBtnActive]}
+                style={[styles.choiceBtn, { borderColor: palette.line, backgroundColor: palette.chip }, languageChoice === 'fr' && choiceActiveStyle]}
                 onPress={() => setLanguageChoice('fr')}
               >
-                <Text style={[styles.choiceText, { color: palette.text }, languageChoice === 'fr' && styles.choiceTextActive]}>FR</Text>
+                <Text style={[styles.choiceText, { color: palette.text }, languageChoice === 'fr' && choiceActiveTextStyle]}>FR</Text>
               </Pressable>
               <Pressable
-                style={[styles.choiceBtn, { borderColor: palette.line, backgroundColor: palette.chip }, languageChoice === 'en' && styles.choiceBtnActive]}
+                style={[styles.choiceBtn, { borderColor: palette.line, backgroundColor: palette.chip }, languageChoice === 'en' && choiceActiveStyle]}
                 onPress={() => setLanguageChoice('en')}
               >
-                <Text style={[styles.choiceText, { color: palette.text }, languageChoice === 'en' && styles.choiceTextActive]}>EN</Text>
+                <Text style={[styles.choiceText, { color: palette.text }, languageChoice === 'en' && choiceActiveTextStyle]}>EN</Text>
               </Pressable>
             </View>
 
@@ -431,7 +488,7 @@ export function HomeScreen() {
 
             <View style={styles.modalActions}>
               <Pressable style={[styles.modalBtn, { backgroundColor: palette.accent }]} onPress={savePrefs}>
-                <Text style={styles.modalBtnText}>{t('home.save')}</Text>
+                <Text style={[styles.modalBtnText, { color: palette.accentText }]}>{t('home.save')}</Text>
               </Pressable>
               <Pressable style={[styles.modalBtn, { borderColor: palette.line, backgroundColor: palette.chip }]} onPress={() => setSettingsOpen(false)}>
                 <Text style={[styles.modalBtnText, { color: palette.text }]}>{t('home.close')}</Text>
@@ -465,6 +522,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
+  heroMetric: { fontFamily: theme.fonts.body, fontSize: 12 },
   pillsRow: { flexDirection: 'row', gap: 8, marginTop: 2 },
   quickRow: { flexDirection: 'row', gap: 8, marginTop: 6 },
   quickBtnPrimary: {
@@ -512,7 +570,6 @@ const styles = StyleSheet.create({
   seasonMeta: { marginTop: 8, fontFamily: theme.fonts.body, fontSize: 12 },
   seasonBadge: { marginTop: 4, fontFamily: theme.fonts.title, fontSize: 12 },
   boardRows: { gap: 8, marginTop: 8 },
-  empty: { fontFamily: theme.fonts.body, fontSize: 13 },
   motivation: {
     borderRadius: 20,
     borderWidth: 1,
@@ -589,18 +646,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 10,
   },
-  choiceBtnActive: {
-    backgroundColor: '#F4D35E',
-    borderColor: '#F4D35E',
-  },
   choiceText: {
     fontFamily: theme.fonts.title,
     textTransform: 'uppercase',
     fontSize: 11,
     letterSpacing: 0.6,
-  },
-  choiceTextActive: {
-    color: '#3A2500',
   },
   switchRow: {
     flexDirection: 'row',
@@ -631,7 +681,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   modalBtnText: {
-    color: '#3A2500',
     fontFamily: theme.fonts.title,
     textTransform: 'uppercase',
     letterSpacing: 0.7,

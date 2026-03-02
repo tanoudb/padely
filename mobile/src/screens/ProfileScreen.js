@@ -10,6 +10,9 @@ import Animated, {
 } from 'react-native-reanimated';
 import { api } from '../api/client';
 import { Card } from '../components/Card';
+import { EmptyState } from '../components/EmptyState';
+import { Skeleton } from '../components/Skeleton';
+import { AnimatedView, useCountUp, useScaleBounce, useStaggeredEntry } from '../hooks/usePadelyAnimations';
 import { useI18n } from '../state/i18n';
 import { useSession } from '../state/session';
 import { useUi } from '../state/ui';
@@ -251,6 +254,16 @@ export function ProfileScreen() {
   const bestDuo = sortedDuos[0] ?? null;
   const rating = dashboard?.rating ?? user.rating ?? 1200;
   const pir = dashboard?.pir ?? user.pir ?? 50;
+  const isLoading = !dashboard && !records;
+  const pirLive = useCountUp(pir);
+  const ratingLive = useCountUp(rating);
+  const identityEntry = useStaggeredEntry(0, !isLoading);
+  const statsEntry = useStaggeredEntry(1, !isLoading);
+  const recordsEntry = useStaggeredEntry(2, !isLoading);
+  const badgesEntry = useStaggeredEntry(3, !isLoading);
+  const heatmapEntry = useStaggeredEntry(4, !isLoading);
+  const ctaEntry = useStaggeredEntry(5, !isLoading);
+  const ctaBounce = useScaleBounce(sortedDuos.length);
   const initials = (user.displayName ?? 'P').slice(0, 2).toUpperCase();
   const arcadeTag = user.arcadeTag ?? `${(user.displayName ?? 'PLAYER').replace(/\s+/g, '').slice(0, 7).toUpperCase()}#${String(user.id ?? '').slice(-4).toUpperCase()}`;
 
@@ -294,14 +307,14 @@ export function ProfileScreen() {
               <Text style={[styles.meta, { color: palette.textSecondary }]}>{t('profile.matchesTogether', { matches: bestDuo.matches })}</Text>
             </>
           ) : (
-            <Text style={[styles.meta, { color: palette.textSecondary }]}>{t('profile.noPair')}</Text>
+            <EmptyState title={t('profile.emptyPartnersTitle')} body={t('profile.emptyPartnersBody')} variant="profile" compact />
           )}
         </Card>
 
         <Card>
           <Text style={[styles.cardTitle, { color: palette.text }]}>{t('profile.allPairs')}</Text>
           {sortedDuos.length === 0 ? (
-            <Text style={[styles.meta, { color: palette.textSecondary }]}>{t('profile.allPairsEmpty')}</Text>
+            <EmptyState title={t('profile.emptyPartnersTitle')} body={t('profile.allPairsEmpty')} variant="profile" compact />
           ) : sortedDuos.map((item) => (
             <View key={item.partnerId} style={[styles.duoRow, { borderBottomColor: palette.line }]}>
               <View>
@@ -349,52 +362,98 @@ export function ProfileScreen() {
         })}
       </View>
 
-      <Card elevated style={styles.identityCard}>
-        <View style={[styles.avatarCircle, { backgroundColor: palette.cardStrong, borderColor: palette.lineStrong ?? palette.line }]}>
-          <Text style={[styles.avatarText, { color: palette.text }]}>{initials}</Text>
-        </View>
-        <View style={styles.identityInfo}>
-          <Text style={[styles.playerName, { color: palette.text }]}>{user.displayName}</Text>
-          <Text style={[styles.rankText, { color: palette.accent }]}>{rankFromRating(rating)}</Text>
-          <Text style={[styles.meta, { color: palette.textSecondary }]}>{t('profile.rankLine', { pir: Math.round(pir), rating: Math.round(rating) })}</Text>
-          <Text style={[styles.meta, { color: palette.textSecondary }]}>{t('profile.arcadeTag', { tag: arcadeTag })}</Text>
-          <Pressable style={[styles.shareTagBtn, { borderColor: palette.line, backgroundColor: palette.cardStrong }]} onPress={shareArcadeTag}>
-            <Text style={[styles.shareTagText, { color: palette.text }]}>{t('profile.shareQr')}</Text>
-          </Pressable>
-        </View>
-      </Card>
+      {isLoading ? (
+        <>
+          <Card elevated style={styles.identityCard}>
+            <Skeleton width={72} height={72} radius={36} />
+            <View style={styles.identityInfo}>
+              <Skeleton width="68%" height={18} />
+              <Skeleton width="40%" height={14} />
+              <Skeleton width="88%" height={12} />
+              <Skeleton width={120} height={34} radius={9} style={{ marginTop: 8 }} />
+            </View>
+          </Card>
+          <Card>
+            <Skeleton width={160} height={14} />
+            <Skeleton width="100%" height={12} style={{ marginTop: 10 }} />
+            <Skeleton width="100%" height={12} style={{ marginTop: 10 }} />
+            <Skeleton width="100%" height={12} style={{ marginTop: 10 }} />
+          </Card>
+          <Card>
+            <Skeleton width={140} height={14} />
+            <Skeleton width="100%" height={118} radius={14} style={{ marginTop: 10 }} />
+          </Card>
+        </>
+      ) : (
+        <>
+          <AnimatedView style={identityEntry}>
+            <Card elevated style={styles.identityCard}>
+              <View style={[styles.avatarCircle, { backgroundColor: palette.cardStrong, borderColor: palette.lineStrong ?? palette.line }]}>
+                <Text style={[styles.avatarText, { color: palette.text }]}>{initials}</Text>
+              </View>
+              <View style={styles.identityInfo}>
+                <Text style={[styles.playerName, { color: palette.text }]}>{user.displayName}</Text>
+                <Text style={[styles.rankText, { color: palette.accent }]}>{rankFromRating(rating)}</Text>
+                <Text style={[styles.meta, { color: palette.textSecondary }]}>{t('profile.rankLine', { pir: pirLive, rating: ratingLive })}</Text>
+                <Text style={[styles.meta, { color: palette.textSecondary }]}>{t('profile.arcadeTag', { tag: arcadeTag })}</Text>
+                <Pressable style={[styles.shareTagBtn, { borderColor: palette.line, backgroundColor: palette.cardStrong }]} onPress={shareArcadeTag}>
+                  <Text style={[styles.shareTagText, { color: palette.text }]}>{t('profile.shareQr')}</Text>
+                </Pressable>
+              </View>
+            </Card>
+          </AnimatedView>
 
-      <Card>
-        <Text style={[styles.cardTitle, { color: palette.text }]}>{t('profile.global')}</Text>
-        <StatLine label={t('profile.statWins')} value={dashboard?.wins ?? 0} palette={palette} />
-        <StatLine label={t('profile.statLosses')} value={dashboard?.losses ?? 0} palette={palette} />
-        <StatLine label={t('profile.statTotalDistance')} value={`${dashboard?.totalDistanceKm ?? 0} km`} palette={palette} />
-        <StatLine label={t('profile.statAverageDistance')} value={`${dashboard?.averageDistanceKm ?? 0} km/match`} palette={palette} />
-        <StatLine label={t('profile.statConsistency')} value={`${dashboard?.consistencyScore ?? 0}/100`} palette={palette} />
-        <StatLine label={t('profile.statRegularity')} value={`${dashboard?.regularityScore ?? 0}/100`} palette={palette} />
-      </Card>
+          <AnimatedView style={statsEntry}>
+            <Card>
+              <Text style={[styles.cardTitle, { color: palette.text }]}>{t('profile.global')}</Text>
+              <StatLine label={t('profile.statWins')} value={dashboard?.wins ?? 0} palette={palette} />
+              <StatLine label={t('profile.statLosses')} value={dashboard?.losses ?? 0} palette={palette} />
+              <StatLine label={t('profile.statTotalDistance')} value={`${dashboard?.totalDistanceKm ?? 0} km`} palette={palette} />
+              <StatLine label={t('profile.statAverageDistance')} value={`${dashboard?.averageDistanceKm ?? 0} km/match`} palette={palette} />
+              <StatLine label={t('profile.statConsistency')} value={`${dashboard?.consistencyScore ?? 0}/100`} palette={palette} />
+              <StatLine label={t('profile.statRegularity')} value={`${dashboard?.regularityScore ?? 0}/100`} palette={palette} />
+            </Card>
+          </AnimatedView>
 
-      <Card>
-        <Text style={[styles.cardTitle, { color: palette.text }]}>{t('profile.recordsTitle')}</Text>
-        <StatLine label={t('profile.recordUpset')} value={`${records?.records?.biggestUpset?.ratingGap ?? 0} pts`} palette={palette} />
-        <StatLine label={t('profile.recordStreak')} value={`${records?.records?.bestWinStreak ?? 0}`} palette={palette} />
-        <StatLine label={t('profile.recordBestSet')} value={records?.records?.bestSet?.score ?? 'N/A'} palette={palette} />
-        <StatLine label={t('profile.recordLongest')} value={`${records?.records?.longestMatch?.minutes ?? 0} min`} palette={palette} />
-      </Card>
+          <AnimatedView style={recordsEntry}>
+            <Card>
+              <Text style={[styles.cardTitle, { color: palette.text }]}>{t('profile.recordsTitle')}</Text>
+              <StatLine label={t('profile.recordUpset')} value={`${records?.records?.biggestUpset?.ratingGap ?? 0} pts`} palette={palette} />
+              <StatLine label={t('profile.recordStreak')} value={`${records?.records?.bestWinStreak ?? 0}`} palette={palette} />
+              <StatLine label={t('profile.recordBestSet')} value={records?.records?.bestSet?.score ?? 'N/A'} palette={palette} />
+              <StatLine label={t('profile.recordLongest')} value={`${records?.records?.longestMatch?.minutes ?? 0} min`} palette={palette} />
+            </Card>
+          </AnimatedView>
 
-      <Card>
-        <Text style={[styles.cardTitle, { color: palette.text }]}>Badges</Text>
-        <BadgeGrid catalog={badges} palette={palette} />
-      </Card>
+          <AnimatedView style={badgesEntry}>
+            <Card>
+              <Text style={[styles.cardTitle, { color: palette.text }]}>Badges</Text>
+              {badges.length ? (
+                <BadgeGrid catalog={badges} palette={palette} />
+              ) : (
+                <EmptyState title={t('profile.emptyBadgeTitle')} body={t('profile.emptyBadgeBody')} variant="profile" compact />
+              )}
+            </Card>
+          </AnimatedView>
 
-      <Card>
-        <Text style={[styles.cardTitle, { color: palette.text }]}>{t('profile.heatmapTitle')}</Text>
-        <Heatmap items={records?.activityHeatmap ?? dashboard?.activityHeatmap ?? []} palette={palette} />
-      </Card>
+          <AnimatedView style={heatmapEntry}>
+            <Card>
+              <Text style={[styles.cardTitle, { color: palette.text }]}>{t('profile.heatmapTitle')}</Text>
+              {(records?.activityHeatmap ?? dashboard?.activityHeatmap ?? []).length ? (
+                <Heatmap items={records?.activityHeatmap ?? dashboard?.activityHeatmap ?? []} palette={palette} />
+              ) : (
+                <EmptyState title={t('profile.emptyHeatmapTitle')} body={t('profile.emptyHeatmapBody')} variant="profile" compact />
+              )}
+            </Card>
+          </AnimatedView>
 
-      <Pressable style={[styles.cta, { backgroundColor: palette.accent }]} onPress={() => setView('partners')}>
-        <Text style={[styles.ctaText, { color: palette.accentText }]}>{t('profile.seePartners')}</Text>
-      </Pressable>
+          <AnimatedView style={[ctaEntry, ctaBounce]}>
+            <Pressable style={[styles.cta, { backgroundColor: palette.accent }]} onPress={() => setView('partners')}>
+              <Text style={[styles.ctaText, { color: palette.accentText }]}>{t('profile.seePartners')}</Text>
+            </Pressable>
+          </AnimatedView>
+        </>
+      )}
       <BadgeUnlockOverlay badge={activeUnlock} palette={palette} />
     </ScrollView>
   );

@@ -2,8 +2,11 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { Card } from '../../components/Card';
+import { EmptyState } from '../../components/EmptyState';
 import { PirGauge } from '../../components/PirGauge';
+import { Skeleton } from '../../components/Skeleton';
 import { api } from '../../api/client';
+import { AnimatedView, useCountUp, useScaleBounce, useStaggeredEntry } from '../../hooks/usePadelyAnimations';
 import { useSession } from '../../state/session';
 import { useUi } from '../../state/ui';
 import { theme } from '../../theme';
@@ -36,6 +39,13 @@ export function PlayResultScreen() {
   const scoreLine = (sets ?? []).map((set) => `${set.a}-${set.b}`).join('  ');
   const previousPir = Number(user.pir ?? 0);
   const currentPir = previousPir + Number(pirDelta || 0);
+  const pirDeltaLive = useCountUp(pirDelta);
+  const pirCurrentLive = useCountUp(currentPir);
+  const showMissingSetup = !setup || !Array.isArray(setup.selectedSlots);
+  const titleEntry = useStaggeredEntry(0, !showMissingSetup);
+  const cardEntry = useStaggeredEntry(1, !showMissingSetup);
+  const actionsEntry = useStaggeredEntry(2, !showMissingSetup);
+  const primaryBounce = useScaleBounce(savedId || pirDelta);
 
   useEffect(() => {
     let mounted = true;
@@ -93,44 +103,73 @@ export function PlayResultScreen() {
 
   return (
     <View style={[styles.root, { backgroundColor: palette.bg }]}>
-      <View style={styles.centered}>
-        <Text style={[styles.title, { color: palette.accent }]}>{tone.title}</Text>
-        <Text style={[styles.subtitle, { color: palette.textSecondary ?? palette.muted }]}>{tone.subtitle}</Text>
-        <Text style={[styles.score, { color: palette.text }]}>{scoreLine}</Text>
-      </View>
+      {showMissingSetup ? (
+        <View style={styles.fallbackWrap}>
+          <EmptyState title="Resultat indisponible" body="Relance un match depuis l ecran setup pour enregistrer un score." variant="result" />
+          <Pressable style={[styles.primaryBtn, { backgroundColor: palette.accent }]} onPress={() => navigation.replace('PlaySetup')}>
+            <Text style={[styles.primaryBtnText, { color: palette.accentText }]}>NOUVEAU MATCH</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <>
+          <AnimatedView style={titleEntry}>
+            <View style={styles.centered}>
+              <Text style={[styles.title, { color: palette.accent }]}>{tone.title}</Text>
+              <Text style={[styles.subtitle, { color: palette.textSecondary ?? palette.muted }]}>{tone.subtitle}</Text>
+              <Text style={[styles.score, { color: palette.text }]}>{scoreLine}</Text>
+            </View>
+          </AnimatedView>
 
-      <Card elevated style={styles.card}>
-        <PirGauge pir={currentPir} delta={pirDelta} rank={user.rankName ?? 'Classement'} />
-        <Text style={[styles.meta, { color: palette.muted }]}>
-          {savedId ? `Match ${savedId.slice(-6)} enregistre` : (saving ? 'Enregistrement en cours...' : 'Pret a enregistrer')}
-        </Text>
-        {!!error ? <Text style={[styles.meta, { color: palette.danger }]}>{error}</Text> : null}
-      </Card>
+          <AnimatedView style={cardEntry}>
+            <Card elevated style={styles.card}>
+              {saving && !savedId ? (
+                <>
+                  <Skeleton width="100%" height={170} radius={18} />
+                  <Skeleton width="70%" height={12} style={{ marginTop: 8, alignSelf: 'center' }} />
+                </>
+              ) : (
+                <>
+                  <PirGauge pir={pirCurrentLive} delta={pirDeltaLive} rank={user.rankName ?? 'Classement'} />
+                  <Text style={[styles.meta, { color: palette.muted }]}>
+                    {savedId ? `Match ${savedId.slice(-6)} enregistre` : (saving ? 'Enregistrement en cours...' : 'Pret a enregistrer')}
+                  </Text>
+                </>
+              )}
+              {!!error ? <Text style={[styles.meta, { color: palette.danger }]}>{error}</Text> : null}
+            </Card>
+          </AnimatedView>
 
-      <View style={styles.actions}>
-        <Pressable
-          style={[styles.secondaryBtn, { borderColor: palette.accent }]}
-          onPress={shareInvite}
-          disabled={!inviteUrl}
-        >
-          <Text style={[styles.secondaryBtnText, { color: inviteUrl ? palette.accent : palette.muted }]}>PARTAGER</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.primaryBtn, { backgroundColor: palette.accent }]}
-          onPress={() => navigation.replace('PlaySetup')}
-        >
-          <Text style={[styles.primaryBtnText, { color: palette.accentText ?? '#09090B' }]}>NOUVEAU MATCH</Text>
-        </Pressable>
-        <Pressable onPress={() => navigation.getParent()?.navigate('HomeTab')}>
-          <Text style={[styles.ghost, { color: palette.textSecondary ?? palette.muted }]}>Retour accueil</Text>
-        </Pressable>
-      </View>
+          <AnimatedView style={actionsEntry}>
+            <View style={styles.actions}>
+              <Pressable
+                style={[styles.secondaryBtn, { borderColor: palette.accent }]}
+                onPress={shareInvite}
+                disabled={!inviteUrl}
+              >
+                <Text style={[styles.secondaryBtnText, { color: inviteUrl ? palette.accent : palette.muted }]}>PARTAGER</Text>
+              </Pressable>
+              <AnimatedView style={primaryBounce}>
+                <Pressable
+                  style={[styles.primaryBtn, { backgroundColor: palette.accent }]}
+                  onPress={() => navigation.replace('PlaySetup')}
+                >
+                  <Text style={[styles.primaryBtnText, { color: palette.accentText }]}>NOUVEAU MATCH</Text>
+                </Pressable>
+              </AnimatedView>
+              <Pressable onPress={() => navigation.getParent()?.navigate('HomeTab')}>
+                <Text style={[styles.ghost, { color: palette.textSecondary ?? palette.muted }]}>Retour accueil</Text>
+              </Pressable>
+            </View>
+          </AnimatedView>
+        </>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, padding: 18, justifyContent: 'space-between' },
+  fallbackWrap: { flex: 1, justifyContent: 'center', gap: 14 },
   centered: { alignItems: 'center', gap: 4, marginTop: 24 },
   title: { fontFamily: theme.fonts.display, fontSize: 42, lineHeight: 44, letterSpacing: 0.7 },
   subtitle: { fontFamily: theme.fonts.title, fontSize: 14 },
