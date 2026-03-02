@@ -104,6 +104,7 @@ export const api = {
   leaderboardByPeriod: (token, city, period) => request(`/api/v1/community/leaderboard?city=${encodeURIComponent(city)}&period=${encodeURIComponent(period)}`, { token }),
   leaderboardPeriods: (token, city) => request(`/api/v1/community/leaderboard/periods?city=${encodeURIComponent(city)}`, { token }),
   crew: (token, city) => request(`/api/v1/community/crew${city ? `?city=${encodeURIComponent(city)}` : ''}`, { token }),
+  communityFeed: (token, limit = 30) => request(`/api/v1/community/feed${toQuery({ limit })}`, { token }),
   communityUnread: (token) => request('/api/v1/community/unread', { token }),
   addFriend: (token, friendId) => request('/api/v1/community/friends', { method: 'POST', token, body: { friendId } }),
   arcadeSearch: (token, tag) => request(`/api/v1/community/arcade/search?tag=${encodeURIComponent(tag)}`, { token }),
@@ -128,6 +129,20 @@ export const api = {
   markPrivateRead: (token, friendId, readAt) =>
     request(`/api/v1/community/messages/${encodeURIComponent(friendId)}/read`, { method: 'POST', token, body: { readAt } }),
   sendPrivateMessage: (token, friendId, text) => request(`/api/v1/community/messages/${encodeURIComponent(friendId)}`, { method: 'POST', token, body: { text } }),
+  groups: (token) => request('/api/v1/groups', { token }),
+  createGroup: (token, body) => request('/api/v1/groups', { method: 'POST', token, body }),
+  joinGroupByCode: (token, clubCode) =>
+    request('/api/v1/groups/join', { method: 'POST', token, body: { clubCode } }),
+  joinGroup: (token, groupId, clubCode) =>
+    request(`/api/v1/groups/${encodeURIComponent(groupId)}/join`, { method: 'POST', token, body: { clubCode } }),
+  leaveGroup: (token, groupId) =>
+    request(`/api/v1/groups/${encodeURIComponent(groupId)}/leave`, { method: 'POST', token }),
+  addGroupMembers: (token, groupId, members) =>
+    request(`/api/v1/groups/${encodeURIComponent(groupId)}/members`, { method: 'POST', token, body: { members } }),
+  groupMessagesPage: (token, groupId, options = {}) =>
+    request(`/api/v1/groups/${encodeURIComponent(groupId)}/messages${toQuery(options)}`, { token }),
+  sendGroupMessage: (token, groupId, text) =>
+    request(`/api/v1/groups/${encodeURIComponent(groupId)}/messages`, { method: 'POST', token, body: { text } }),
   dashboard: (token, userId, period = 'all') =>
     request(`/api/v1/stats/dashboard/${encodeURIComponent(userId)}${toQuery({ period })}`, { token }),
   duoStats: async (token, userId, period = 'all') => {

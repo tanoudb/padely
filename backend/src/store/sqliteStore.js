@@ -264,6 +264,30 @@ export class SQLiteStore {
       CREATE INDEX IF NOT EXISTS idx_clubs_city_lower ON clubs(city_lower);
       CREATE INDEX IF NOT EXISTS idx_clubs_join_code_lower ON clubs(join_code_lower);
 
+      CREATE TABLE IF NOT EXISTS groups (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL,
+        created_by TEXT NOT NULL,
+        club_code TEXT,
+        created_at TEXT NOT NULL,
+        last_message_at TEXT,
+        payload_json TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_groups_type ON groups(type);
+      CREATE INDEX IF NOT EXISTS idx_groups_created_at ON groups(created_at);
+
+      CREATE TABLE IF NOT EXISTS group_members (
+        group_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        added_at TEXT NOT NULL,
+        PRIMARY KEY (group_id, user_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_group_members_user ON group_members(user_id);
+      CREATE INDEX IF NOT EXISTS idx_group_members_group ON group_members(group_id);
+
       CREATE TABLE IF NOT EXISTS messages (
         id TEXT PRIMARY KEY,
         kind TEXT NOT NULL,
@@ -364,6 +388,26 @@ export class SQLiteStore {
         lower(club.joinCode),
         createdAt,
       );
+
+      const groupId = `grp_${String(club.key).replace(/[^a-z0-9]+/gi, '_').toLowerCase()}`;
+      const groupPayload = JSON.stringify({
+        id: groupId,
+        name: club.title,
+        type: 'club',
+        createdBy: 'system',
+        members: [],
+        clubCode: club.joinCode,
+        createdAt,
+        lastMessageAt: null,
+      });
+      this.db.prepare(`
+        INSERT INTO groups (id, name, type, created_by, club_code, created_at, last_message_at, payload_json)
+        VALUES (?, ?, 'club', 'system', ?, ?, NULL, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          name = excluded.name,
+          club_code = excluded.club_code,
+          payload_json = excluded.payload_json
+      `).run(groupId, club.title, club.joinCode, createdAt, groupPayload);
     }
   }
 
@@ -806,6 +850,108 @@ export class SQLiteStore {
       .prepare('SELECT key, title, city, join_code AS joinCode FROM clubs WHERE key = ? LIMIT 1')
       .get(key);
     return row ?? null;
+  }
+
+  createGroup(group) {
+    const id = group?.id ?? newId('grp');
+    const createdAt = group?.createdAt ?? nowIso();
+    const members = [...new Set((group?.members ?? []).map((item) => String(item ?? '').trim()).filter(Boolean))];
+    const payload = {
+      id,
+      name: String(group?.name ?? '').trim(),
+      type: String(group?.type ?? 'private') === 'club' ? 'club' : 'private',
+      createdBy: String(group?.createdBy ?? ''),
+      members,
+      clubCode: group?.clubCode ? String(group.clubCode).trim() : null,
+      createdAt,
+      lastMessageAt: group?.lastMessageAt ?? null,
+    };
+
+    this.db.prepare(`
+      INSERT INTO groups (id, name, type, created_by, club_code, created_at, last_message_at, payload_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name,
+        type = excluded.type,
+        created_by = excluded.created_by,
+        club_code = excluded.club_code,
+        last_message_at = excluded.last_message_at,
+        payload_json = excluded.payload_json
+    `).run(
+      payload.id,
+      payload.name,
+      payload.type,
+      payload.createdBy,
+      payload.clubCode,
+      payload.createdAt,
+      payload.lastMessageAt,
+      JSON.stringify(payload),
+    );
+
+    this.db.prepare('DELETE FROM group_members WHERE group_id = ?').run(payload.id);
+    const stmt = this.db.prepare(`
+      INSERT OR IGNORE INTO group_members (group_id, user_id, added_at)
+      VALUES (?, ?, ?)
+    `);
+    for (const memberId of payload.members) {
+      stmt.run(payload.id, memberId, nowIso());
+    }
+
+    return payload;
+  }
+
+  getGroupById(groupId) {
+    const row = this.db
+      .prepare('SELECT payload_json FROM groups WHERE id = ? LIMIT 1')
+      .get(groupId);
+    return parseJson(row?.payload_json, null);
+  }
+
+  listGroupsForUser(userId) {
+    const rows = this.db.prepare(`
+      SELECT g.payload_json
+      FROM groups g
+      JOIN group_members gm ON gm.group_id = g.id
+      WHERE gm.user_id = ?
+      ORDER BY COALESCE(g.last_message_at, g.created_at) DESC
+    `).all(userId);
+    return rows.map((row) => parseJson(row.payload_json, null)).filter(Boolean);
+  }
+
+  updateGroup(groupId, patch = {}) {
+    const current = this.getGroupById(groupId);
+    if (!current) {
+      return null;
+    }
+    const members = patch.members
+      ? [...new Set((patch.members ?? []).map((item) => String(item ?? '').trim()).filter(Boolean))]
+      : (current.members ?? []);
+    const next = {
+      ...current,
+      ...patch,
+      members,
+    };
+    return this.createGroup(next);
+  }
+
+  addGroupMember(groupId, userId) {
+    const current = this.getGroupById(groupId);
+    if (!current) {
+      return null;
+    }
+    return this.updateGroup(groupId, {
+      members: [...new Set([...(current.members ?? []), userId])],
+    });
+  }
+
+  removeGroupMember(groupId, userId) {
+    const current = this.getGroupById(groupId);
+    if (!current) {
+      return null;
+    }
+    return this.updateGroup(groupId, {
+      members: (current.members ?? []).filter((memberId) => memberId !== userId),
+    });
   }
 
   unlockBadge(userId, badgeKey, meta = {}) {

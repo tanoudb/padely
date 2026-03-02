@@ -3,6 +3,7 @@ import { Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { Card } from '../../components/Card';
 import { EmptyState } from '../../components/EmptyState';
+import { PlayerCard } from '../../components/PlayerCard';
 import { PirGauge } from '../../components/PirGauge';
 import { Skeleton } from '../../components/Skeleton';
 import { api } from '../../api/client';
@@ -240,6 +241,17 @@ export function PlayResultScreen() {
           <AnimatedView style={memoryEntry}>
             <Card style={styles.memoryCard}>
               <Text style={[styles.memoryTitle, { color: palette.text }]}>{t('result.memoryTitle')}</Text>
+              <PlayerCard
+                size="compact"
+                player={{ displayName: user.displayName, arcadeTag: user.arcadeTag }}
+                pir={currentPir}
+                rating={user.rating}
+                formScore={Number(playerProfilePack?.playerProfile?.formScore ?? 0)}
+                personality={playerProfilePack?.playerProfile?.personality ?? null}
+                type={playerProfilePack?.playerProfile?.type ?? null}
+                pinnedBadges={latestBadge ? [{ key: latestBadge.badgeKey, title: latestBadge.title, tier: latestBadge.tier }] : []}
+                pirDna={{}}
+              />
               <Text style={[styles.meta, { color: palette.textSecondary }]}>{`${labels.teamA} vs ${labels.teamB}`}</Text>
               <Text style={[styles.meta, { color: palette.textSecondary }]}>{`${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`}</Text>
               <Text style={[styles.meta, { color: palette.textSecondary }]}>{`PIR ${pirDelta >= 0 ? '+' : ''}${pirDelta}`}</Text>

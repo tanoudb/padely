@@ -70,6 +70,7 @@ export class MemoryStore {
     this.cityLeaderboard = new Map();
     this.pairRatings = new Map();
     this.messages = new Map();
+    this.groups = new Map();
     this.badges = new Map();
     this.seasonState = null;
     this.seasonArchive = new Map();
@@ -93,6 +94,20 @@ export class MemoryStore {
         joinCode: 'CP-PARIS-01',
       },
     ];
+
+    for (const club of this.clubs) {
+      const id = `grp_${String(club.key).replace(/[^a-z0-9]+/gi, '_').toLowerCase()}`;
+      this.groups.set(id, {
+        id,
+        name: club.title,
+        type: 'club',
+        createdBy: 'system',
+        members: [],
+        clubCode: club.joinCode,
+        createdAt: nowIso(),
+        lastMessageAt: null,
+      });
+    }
   }
 
   createUser({ email, passwordHash, provider, displayName, isVerified }) {
@@ -434,6 +449,77 @@ export class MemoryStore {
 
   getClubByKey(key) {
     return this.clubs.find((club) => club.key === key) ?? null;
+  }
+
+  createGroup(group) {
+    const id = group?.id ?? newId('grp');
+    const members = [...new Set((group?.members ?? []).map((item) => String(item ?? '').trim()).filter(Boolean))];
+    const created = {
+      id,
+      name: String(group?.name ?? '').trim(),
+      type: group?.type === 'club' ? 'club' : 'private',
+      createdBy: String(group?.createdBy ?? ''),
+      members,
+      clubCode: group?.clubCode ? String(group.clubCode).trim() : null,
+      createdAt: group?.createdAt ?? nowIso(),
+      lastMessageAt: group?.lastMessageAt ?? null,
+    };
+    this.groups.set(id, created);
+    return created;
+  }
+
+  getGroupById(groupId) {
+    return this.groups.get(groupId) ?? null;
+  }
+
+  listGroupsForUser(userId) {
+    return [...this.groups.values()]
+      .filter((group) => (group.members ?? []).includes(userId))
+      .sort((a, b) => new Date(b.lastMessageAt ?? b.createdAt ?? 0).getTime() - new Date(a.lastMessageAt ?? a.createdAt ?? 0).getTime());
+  }
+
+  updateGroup(groupId, patch = {}) {
+    const current = this.groups.get(groupId);
+    if (!current) {
+      return null;
+    }
+    const nextMembers = patch.members
+      ? [...new Set((patch.members ?? []).map((item) => String(item ?? '').trim()).filter(Boolean))]
+      : current.members;
+    const merged = {
+      ...current,
+      ...patch,
+      members: nextMembers,
+    };
+    this.groups.set(groupId, merged);
+    return merged;
+  }
+
+  addGroupMember(groupId, userId) {
+    const current = this.groups.get(groupId);
+    if (!current) {
+      return null;
+    }
+    const nextMembers = [...new Set([...(current.members ?? []), userId])];
+    const merged = {
+      ...current,
+      members: nextMembers,
+    };
+    this.groups.set(groupId, merged);
+    return merged;
+  }
+
+  removeGroupMember(groupId, userId) {
+    const current = this.groups.get(groupId);
+    if (!current) {
+      return null;
+    }
+    const merged = {
+      ...current,
+      members: (current.members ?? []).filter((memberId) => memberId !== userId),
+    };
+    this.groups.set(groupId, merged);
+    return merged;
   }
 
   unlockBadge(userId, badgeKey, meta = {}) {

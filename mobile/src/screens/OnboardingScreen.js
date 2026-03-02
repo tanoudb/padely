@@ -3,17 +3,15 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   View,
-  useWindowDimensions,
 } from 'react-native';
 import Animated, {
   interpolate,
   useAnimatedStyle,
   useSharedValue,
-  withSpring,
+  withTiming,
 } from 'react-native-reanimated';
 import { api } from '../api/client';
 import { Card } from '../components/Card';
@@ -22,114 +20,63 @@ import { useSession } from '../state/session';
 import { useUi } from '../state/ui';
 import { theme } from '../theme';
 
-const SPRING = { damping: 15, stiffness: 150, mass: 0.8 };
-
-const QUESTIONS = [
-  {
-    key: 'vitres',
-    titleKey: 'auth.quizVitres',
-    options: ['A', 'B', 'C'],
-  },
-  {
-    key: 'filet',
-    titleKey: 'auth.quizFilet',
-    options: ['A', 'B', 'C'],
-  },
-  {
-    key: 'tournoi',
-    titleKey: 'auth.quizTournoi',
-    options: ['A', 'B', 'C'],
-  },
-  {
-    key: 'technique',
-    titleKey: 'auth.quizTechnique',
-    options: ['A', 'B', 'C'],
-  },
+const LEVELS = [
+  { key: 'beginner', value: 2, labelKey: 'onboarding.levelBeginner', subKey: 'onboarding.levelBeginnerSub' },
+  { key: 'intermediate', value: 4, labelKey: 'onboarding.levelIntermediate', subKey: 'onboarding.levelIntermediateSub' },
+  { key: 'advanced', value: 6, labelKey: 'onboarding.levelAdvanced', subKey: 'onboarding.levelAdvancedSub' },
+  { key: 'expert', value: 8, labelKey: 'onboarding.levelExpert', subKey: 'onboarding.levelExpertSub' },
 ];
 
 export function OnboardingScreen() {
   const { token, user, setUser } = useSession();
   const { t } = useI18n();
   const { palette } = useUi();
-  const { width } = useWindowDimensions();
 
   const [step, setStep] = useState(0);
-  const [level, setLevel] = useState(4);
-  const [answers, setAnswers] = useState({});
-  const [city, setCity] = useState(user?.city ?? 'Lyon');
-  const [defaultMatchMode, setDefaultMatchMode] = useState('ranked');
-  const [matchFormat, setMatchFormat] = useState('marathon');
-  const [pointRule, setPointRule] = useState('punto_de_oro');
-  const [playerRhythm, setPlayerRhythm] = useState(user?.settings?.playerRhythm ?? 'regular');
-  const [autoSaveMatch, setAutoSaveMatch] = useState(true);
-  const [notifMatchInvites, setNotifMatchInvites] = useState(true);
-  const [notifLeaderboard, setNotifLeaderboard] = useState(true);
-  const [notifPartnerAvailability, setNotifPartnerAvailability] = useState(true);
-  const [publicProfile, setPublicProfile] = useState(true);
+  const [levelKey, setLevelKey] = useState('intermediate');
+  const [city, setCity] = useState(user?.city ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const sliderStep = useSharedValue(0);
 
-  const allAnswered = useMemo(() => QUESTIONS.every((q) => answers[q.key]), [answers]);
-  const canContinue = step === 0
-    ? Number(level) >= 1 && Number(level) <= 8
-    : step === 1
-      ? allAnswered
-      : city.trim().length >= 2;
-  const estimatedLevel = useMemo(() => {
-    if (!allAnswered) return level;
-    const score = QUESTIONS.reduce((sum, q) => {
-      const answer = answers[q.key];
-      if (answer === 'A') return sum + 1;
-      if (answer === 'B') return sum + 2;
-      if (answer === 'C') return sum + 3;
-      return sum + 2;
-    }, 0);
-    const normalized = Math.round((score / (QUESTIONS.length * 3)) * 7) + 1;
-    return Math.min(8, Math.max(1, normalized));
-  }, [allAnswered, answers, level]);
-  const welcomeLine = playerRhythm === 'light'
+  const stepAnim = useSharedValue(0);
+
+  useEffect(() => {
+    stepAnim.value = withTiming(step, { duration: 220 });
+  }, [step, stepAnim]);
+
+  const panelAStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(Math.abs(stepAnim.value - 0), [0, 1], [1, 0.34]),
+    transform: [{ translateX: (stepAnim.value - 0) * -28 }],
+  }));
+
+  const panelBStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(Math.abs(stepAnim.value - 1), [0, 1], [1, 0.34]),
+    transform: [{ translateX: (stepAnim.value - 1) * -28 }],
+  }));
+
+  const selectedLevel = useMemo(
+    () => LEVELS.find((item) => item.key === levelKey) ?? LEVELS[1],
+    [levelKey],
+  );
+
+  const canNext = step === 0 ? Boolean(levelKey) : city.trim().length >= 2;
+  const welcomeLine = user?.settings?.playerRhythm === 'light'
     ? t('onboarding.welcomeLight')
     : t('onboarding.welcomeAdaptive');
 
-  useEffect(() => {
-    sliderStep.value = withSpring(step, SPRING);
-  }, [sliderStep, step]);
-
-  function panelStyle(index) {
-    return useAnimatedStyle(() => {
-      const relative = index - sliderStep.value;
-      return {
-        transform: [{ translateX: relative * width * 0.86 }],
-        opacity: interpolate(Math.abs(relative), [0, 1], [1, 0.3]),
-      };
-    }, [index, width]);
-  }
-
-  const panel0 = panelStyle(0);
-  const panel1 = panelStyle(1);
-  const panel2 = panelStyle(2);
-
   async function submit() {
-    setError('');
+    if (saving || !canNext) {
+      return;
+    }
+
     setSaving(true);
+    setError('');
     try {
       const profile = await api.completeOnboarding(token, {
-        level: estimatedLevel,
-        quizAnswers: answers,
+        level: selectedLevel.value,
         city: city.trim(),
         preferences: {
-          defaultMatchMode,
-          matchFormat,
-          pointRule,
-          playerRhythm,
-          autoSaveMatch,
-          notifications: {
-            matchInvites: notifMatchInvites,
-            partnerAvailability: notifPartnerAvailability,
-            leaderboardMovement: notifLeaderboard,
-          },
-          publicProfile,
+          publicProfile: true,
         },
       });
       setUser(profile);
@@ -140,28 +87,35 @@ export function OnboardingScreen() {
     }
   }
 
+  function onNext() {
+    if (!canNext) {
+      return;
+    }
+    if (step === 0) {
+      setStep(1);
+      return;
+    }
+    submit().catch(() => {});
+  }
+
   return (
-    <View style={[styles.root, { backgroundColor: palette.bg }]}>
-      <View style={[styles.bgOrbTop, { backgroundColor: palette.accentMuted }]} />
-      <View style={[styles.bgOrbBottom, { backgroundColor: palette.accent2Muted ?? palette.accentMuted }]} />
+    <View style={[styles.root, { backgroundColor: palette.bg }]}> 
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <Text style={[styles.kicker, { color: palette.accent }]}>{t('onboarding.kicker')}</Text>
+        <Text style={[styles.title, { color: palette.text }]}>{t('onboarding.title', { name: user?.displayName ?? t('profile.playerFallback') })}</Text>
+        <Text style={[styles.subtitle, { color: palette.textSecondary }]}>{t('onboarding.subtitleSimple')}</Text>
+        <Text style={[styles.welcome, { color: palette.accent2 }]}>{welcomeLine}</Text>
 
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <Text style={[styles.eyebrow, { color: palette.accent }]}>{t('onboarding.kicker')}</Text>
-        <Text style={[styles.title, { color: palette.text }]}>{t('onboarding.title', { name: user?.displayName ?? 'Player' })}</Text>
-        <Text style={[styles.subtitle, { color: palette.textSecondary }]}>{t('onboarding.subtitle')}</Text>
-        <Text style={[styles.welcomeLine, { color: palette.accent2 }]}>{welcomeLine}</Text>
-
-        <View style={styles.dotsRow}>
-          {[0, 1, 2].map((index) => {
-            const active = index === step;
+        <View style={styles.stepsRow}>
+          {[0, 1].map((index) => {
+            const active = index <= step;
             return (
               <View
-                key={`dot_${index}`}
+                key={String(index)}
                 style={[
-                  styles.dot,
+                  styles.stepDot,
                   {
-                    width: active ? 26 : 10,
-                    backgroundColor: active ? palette.accent : palette.lineMedium ?? palette.line,
+                    backgroundColor: active ? palette.accent : palette.line,
                   },
                 ]}
               />
@@ -169,81 +123,42 @@ export function OnboardingScreen() {
           })}
         </View>
 
-        <View style={styles.sliderWrap}>
-          <Animated.View style={[styles.panel, panel0]}>
-            <Card elevated style={styles.panelCard}>
-              <Text style={[styles.cardTitle, { color: palette.text }]}>{t('onboarding.step1Title')}</Text>
-              <Text style={[styles.cardSub, { color: palette.textSecondary }]}>{t('onboarding.step1Sub')}</Text>
+        {step === 0 ? (
+          <Animated.View style={panelAStyle}>
+            <Card elevated>
+              <Text style={[styles.cardTitle, { color: palette.text }]}>{t('onboarding.stepLevelTitle')}</Text>
+              <Text style={[styles.cardSub, { color: palette.textSecondary }]}>{t('onboarding.stepLevelSub')}</Text>
+
               <View style={styles.levelGrid}>
-                {[1, 2, 3, 4, 5, 6, 7, 8].map((value) => {
-                  const active = value === level;
+                {LEVELS.map((item) => {
+                  const active = item.key === levelKey;
                   return (
                     <Pressable
-                      key={String(value)}
+                      key={item.key}
                       style={[
-                        styles.levelChip,
+                        styles.levelBtn,
                         {
-                          backgroundColor: active ? palette.accent : palette.bgAlt,
                           borderColor: active ? palette.accent : palette.line,
+                          backgroundColor: active ? palette.accentMuted : palette.bgAlt,
                         },
                       ]}
-                      onPress={() => setLevel(value)}
+                      onPress={() => setLevelKey(item.key)}
                     >
-                      <Text style={[styles.levelText, { color: active ? palette.accentText : palette.text }]}>{value}</Text>
+                      <Text style={[styles.levelTitle, { color: active ? palette.accent : palette.text }]}>{t(item.labelKey)}</Text>
+                      <Text style={[styles.levelSub, { color: palette.textSecondary }]}>{t(item.subKey)}</Text>
                     </Pressable>
                   );
                 })}
               </View>
-              <Text style={[styles.meta, { color: palette.textSecondary }]}>
-                {t(`auth.level${level}`)}
-              </Text>
             </Card>
           </Animated.View>
+        ) : null}
 
-          <Animated.View style={[styles.panel, panel1]}>
-            <Card elevated style={styles.panelCard}>
-              <Text style={[styles.cardTitle, { color: palette.text }]}>{t('onboarding.step2Title')}</Text>
-              <Text style={[styles.cardSub, { color: palette.textSecondary }]}>{t('onboarding.step2Sub')}</Text>
-              {QUESTIONS.map((question) => (
-                <View key={question.key} style={styles.questionBlock}>
-                  <Text style={[styles.questionTitle, { color: palette.text }]}>{t(question.titleKey)}</Text>
-                  <View style={styles.optionsRow}>
-                    {question.options.map((option, optionIndex) => {
-                      const active = answers[question.key] === option;
-                      const optionLabel = optionIndex === 0
-                        ? t('onboarding.optionLow')
-                        : optionIndex === 1
-                          ? t('onboarding.optionMid')
-                          : t('onboarding.optionHigh');
-                      return (
-                        <Pressable
-                          key={`${question.key}_${option}`}
-                          style={[
-                            styles.option,
-                            {
-                              borderColor: active ? palette.accent : palette.line,
-                              backgroundColor: active ? palette.accentMuted : palette.bgAlt,
-                            },
-                          ]}
-                          onPress={() => setAnswers((prev) => ({ ...prev, [question.key]: option }))}
-                        >
-                          <Text style={[styles.optionText, { color: active ? palette.accent : palette.textSecondary }]}>{optionLabel}</Text>
-                        </Pressable>
-                      );
-                    })}
-                  </View>
-                </View>
-              ))}
-              <Text style={[styles.meta, { color: palette.textSecondary }]}>
-                {t('auth.quizEstimated', { level: estimatedLevel })}
-              </Text>
-            </Card>
-          </Animated.View>
-
-          <Animated.View style={[styles.panel, panel2]}>
-            <Card elevated style={styles.panelCard}>
-              <Text style={[styles.cardTitle, { color: palette.text }]}>{t('onboarding.step3Title')}</Text>
-              <Text style={[styles.cardSub, { color: palette.textSecondary }]}>{t('onboarding.step3Sub')}</Text>
+        {step === 1 ? (
+          <Animated.View style={panelBStyle}>
+            <Card elevated>
+              <Text style={[styles.cardTitle, { color: palette.text }]}>{t('onboarding.stepCityTitle')}</Text>
+              <Text style={[styles.cardSub, { color: palette.textSecondary }]}>{t('onboarding.stepCitySub')}</Text>
 
               <TextInput
                 value={city}
@@ -251,7 +166,7 @@ export function OnboardingScreen() {
                 placeholder={t('onboarding.cityPlaceholder')}
                 placeholderTextColor={palette.muted}
                 style={[
-                  styles.cityInput,
+                  styles.input,
                   {
                     color: palette.text,
                     borderColor: palette.line,
@@ -259,162 +174,28 @@ export function OnboardingScreen() {
                   },
                 ]}
               />
-
-              <Text style={[styles.prefLabel, { color: palette.textSecondary }]}>{t('onboarding.defaultMode')}</Text>
-              <View style={styles.prefRow}>
-                {['ranked', 'friendly'].map((mode) => {
-                  const active = mode === defaultMatchMode;
-                  return (
-                    <Pressable
-                      key={mode}
-                      style={[
-                        styles.prefChip,
-                        {
-                          borderColor: active ? palette.accent : palette.line,
-                          backgroundColor: active ? palette.accentMuted : palette.bgAlt,
-                        },
-                      ]}
-                      onPress={() => setDefaultMatchMode(mode)}
-                    >
-                      <Text style={[styles.prefChipText, { color: active ? palette.accent : palette.textSecondary }]}>
-                        {mode === 'ranked' ? t('home.ranked') : t('home.friendly')}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-
-              <Text style={[styles.prefLabel, { color: palette.textSecondary }]}>{t('onboarding.defaultFormat')}</Text>
-              <View style={styles.prefRow}>
-                {[
-                  { key: 'standard', label: t('home.standard') },
-                  { key: 'club', label: t('home.club') },
-                  { key: 'marathon', label: t('home.marathon') },
-                ].map((entry) => {
-                  const active = entry.key === matchFormat;
-                  return (
-                    <Pressable
-                      key={entry.key}
-                      style={[
-                        styles.prefChip,
-                        {
-                          borderColor: active ? palette.accent : palette.line,
-                          backgroundColor: active ? palette.accentMuted : palette.bgAlt,
-                        },
-                      ]}
-                      onPress={() => setMatchFormat(entry.key)}
-                    >
-                      <Text style={[styles.prefChipText, { color: active ? palette.accent : palette.textSecondary }]}>{entry.label}</Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-
-              <Text style={[styles.prefLabel, { color: palette.textSecondary }]}>{t('onboarding.pointRule')}</Text>
-              <View style={styles.prefRow}>
-                {[
-                  { key: 'punto_de_oro', label: t('home.pointPunto') },
-                  { key: 'avantage', label: t('home.pointAdv') },
-                ].map((entry) => {
-                  const active = entry.key === pointRule;
-                  return (
-                    <Pressable
-                      key={entry.key}
-                      style={[
-                        styles.prefChip,
-                        {
-                          borderColor: active ? palette.accent : palette.line,
-                          backgroundColor: active ? palette.accentMuted : palette.bgAlt,
-                        },
-                      ]}
-                      onPress={() => setPointRule(entry.key)}
-                    >
-                      <Text style={[styles.prefChipText, { color: active ? palette.accent : palette.textSecondary }]}>{entry.label}</Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-
-              <Text style={[styles.prefLabel, { color: palette.textSecondary }]}>{t('onboarding.playerRhythm')}</Text>
-              <View style={styles.prefRow}>
-                {[
-                  { key: 'light', label: t('onboarding.rhythmLight') },
-                  { key: 'regular', label: t('onboarding.rhythmRegular') },
-                  { key: 'intense', label: t('onboarding.rhythmIntense') },
-                ].map((entry) => {
-                  const active = entry.key === playerRhythm;
-                  return (
-                    <Pressable
-                      key={entry.key}
-                      style={[
-                        styles.prefChip,
-                        {
-                          borderColor: active ? palette.accent : palette.line,
-                          backgroundColor: active ? palette.accentMuted : palette.bgAlt,
-                        },
-                      ]}
-                      onPress={() => setPlayerRhythm(entry.key)}
-                    >
-                      <Text style={[styles.prefChipText, { color: active ? palette.accent : palette.textSecondary }]}>{entry.label}</Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-
-              {[
-                { key: 'autoSave', label: t('onboarding.autoSave'), value: autoSaveMatch, setter: setAutoSaveMatch },
-                { key: 'notifMatch', label: t('onboarding.notifMatchInvites'), value: notifMatchInvites, setter: setNotifMatchInvites },
-                { key: 'notifPartner', label: t('onboarding.notifPartner'), value: notifPartnerAvailability, setter: setNotifPartnerAvailability },
-                { key: 'notifLeaderboard', label: t('onboarding.notifLeaderboard'), value: notifLeaderboard, setter: setNotifLeaderboard },
-                { key: 'publicProfile', label: t('onboarding.publicProfile'), value: publicProfile, setter: setPublicProfile },
-              ].map((row) => (
-                <View key={row.key} style={styles.switchRow}>
-                  <Text style={[styles.switchLabel, { color: palette.text }]}>{row.label}</Text>
-                  <Switch
-                    value={row.value}
-                    onValueChange={row.setter}
-                    trackColor={{ false: palette.lineMedium ?? palette.line, true: palette.accent }}
-                    thumbColor={row.value ? palette.accentText : palette.bgElevated}
-                  />
-                </View>
-              ))}
             </Card>
           </Animated.View>
-        </View>
+        ) : null}
 
         {!!error ? <Text style={[styles.error, { color: palette.danger }]}>{error}</Text> : null}
 
-        <View style={styles.actions}>
+        <View style={styles.actionsRow}>
           {step > 0 ? (
             <Pressable
-              style={[styles.secondaryBtn, { borderColor: palette.line, backgroundColor: palette.bgAlt }]}
+              style={[styles.actionBtn, { backgroundColor: palette.cardStrong }]}
               onPress={() => setStep((current) => Math.max(0, current - 1))}
-              disabled={saving}
             >
-              <Text style={[styles.secondaryLabel, { color: palette.textSecondary }]}>{t('onboarding.back')}</Text>
+              <Text style={[styles.actionText, { color: palette.text }]}>{t('onboarding.back')}</Text>
             </Pressable>
           ) : null}
 
           <Pressable
-            style={[
-              styles.primaryBtn,
-              {
-                backgroundColor: canContinue ? palette.accent : palette.cardStrong,
-                opacity: saving ? 0.65 : 1,
-              },
-            ]}
-            onPress={() => {
-              if (!canContinue || saving) return;
-              if (step < 2) {
-                setStep((current) => Math.min(2, current + 1));
-                return;
-              }
-              submit();
-            }}
-            disabled={!canContinue || saving}
+            style={[styles.actionBtn, { backgroundColor: canNext ? palette.accent : palette.cardStrong }]}
+            onPress={onNext}
           >
-            <Text style={[styles.primaryLabel, { color: canContinue ? palette.accentText : palette.textSecondary }]}>
-              {step < 2 ? t('onboarding.next') : (saving ? t('onboarding.saving') : t('onboarding.finish'))}
+            <Text style={[styles.actionText, { color: canNext ? palette.accentText : palette.textSecondary }]}>
+              {step === 0 ? t('onboarding.next') : (saving ? t('onboarding.saving') : t('onboarding.finish'))}
             </Text>
           </Pressable>
         </View>
@@ -425,131 +206,92 @@ export function OnboardingScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  scroll: { flex: 1 },
-  content: { padding: 16, paddingTop: 34, paddingBottom: 26 },
-  bgOrbTop: {
-    position: 'absolute',
-    width: 240,
-    height: 240,
-    borderRadius: 120,
-    top: -110,
-    left: -60,
-  },
-  bgOrbBottom: {
-    position: 'absolute',
-    width: 220,
-    height: 220,
-    borderRadius: 110,
-    bottom: -100,
-    right: -70,
-  },
-  eyebrow: {
+  content: { padding: 16, gap: 12, paddingBottom: 30 },
+  kicker: {
     fontFamily: theme.fonts.title,
     fontSize: 11,
-    letterSpacing: 1.8,
+    letterSpacing: 1,
     textTransform: 'uppercase',
   },
-  title: { marginTop: 8, fontFamily: theme.fonts.display, fontSize: 39, lineHeight: 41 },
-  subtitle: { marginTop: 6, fontFamily: theme.fonts.body, fontSize: 13, lineHeight: 18 },
-  welcomeLine: { marginTop: 4, fontFamily: theme.fonts.title, fontSize: 12, letterSpacing: 0.4 },
-  dotsRow: { marginTop: 16, marginBottom: 14, flexDirection: 'row', alignItems: 'center', gap: 8 },
-  dot: { height: 10, borderRadius: 9 },
-  sliderWrap: {
-    width: '100%',
-    minHeight: 560,
-    overflow: 'hidden',
-    position: 'relative',
+  title: {
+    fontFamily: theme.fonts.display,
+    fontSize: 36,
+    lineHeight: 38,
   },
-  panel: {
-    width: '100%',
-    position: 'absolute',
-    left: 0,
-    top: 0,
-  },
-  panelCard: {
-    minHeight: 560,
-  },
-  cardTitle: {
-    fontFamily: theme.fonts.title,
-    fontSize: 18,
-    textTransform: 'uppercase',
-    letterSpacing: 0.7,
-  },
-  cardSub: {
-    marginTop: 4,
-    marginBottom: 12,
+  subtitle: {
     fontFamily: theme.fonts.body,
     fontSize: 13,
   },
-  levelGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 8 },
-  levelChip: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
+  welcome: {
+    fontFamily: theme.fonts.title,
+    fontSize: 12,
+    letterSpacing: 0.4,
   },
-  levelText: { fontFamily: theme.fonts.title, fontSize: 18 },
-  meta: { marginTop: 8, fontFamily: theme.fonts.body, fontSize: 13 },
-  questionBlock: { marginBottom: 14 },
-  questionTitle: { fontFamily: theme.fonts.title, marginBottom: 8, fontSize: 14 },
-  optionsRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
-  option: {
-    minHeight: 34,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  optionText: { fontFamily: theme.fonts.body, fontSize: 12 },
-  cityInput: {
-    minHeight: 52,
-    borderRadius: 13,
-    borderWidth: 1,
-    paddingHorizontal: 14,
-    fontFamily: theme.fonts.body,
-    fontSize: 14,
-  },
-  prefLabel: { marginTop: 12, marginBottom: 8, fontFamily: theme.fonts.title, fontSize: 12, letterSpacing: 0.5 },
-  prefRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  prefChip: {
-    minHeight: 36,
-    borderRadius: 11,
-    borderWidth: 1,
-    paddingHorizontal: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  prefChipText: { fontFamily: theme.fonts.title, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.55 },
-  switchRow: {
-    marginTop: 10,
-    minHeight: 44,
+  stepsRow: {
+    marginTop: 2,
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    gap: 8,
   },
-  switchLabel: { fontFamily: theme.fonts.body, fontSize: 13 },
-  actions: {
-    marginTop: 16,
-    gap: 10,
+  stepDot: {
+    flex: 1,
+    height: 6,
+    borderRadius: 999,
   },
-  primaryBtn: {
-    minHeight: 56,
+  cardTitle: {
+    fontFamily: theme.fonts.title,
+    fontSize: 16,
+    marginBottom: 6,
+  },
+  cardSub: {
+    fontFamily: theme.fonts.body,
+    fontSize: 12,
+    marginBottom: 10,
+  },
+  levelGrid: {
+    gap: 8,
+  },
+  levelBtn: {
+    borderWidth: 1,
+    minHeight: 64,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    justifyContent: 'center',
+  },
+  levelTitle: {
+    fontFamily: theme.fonts.title,
+    fontSize: 14,
+    marginBottom: 2,
+  },
+  levelSub: {
+    fontFamily: theme.fonts.body,
+    fontSize: 12,
+  },
+  input: {
+    minHeight: 48,
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    fontFamily: theme.fonts.body,
+  },
+  error: {
+    fontFamily: theme.fonts.body,
+    fontSize: 12,
+  },
+  actionsRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  actionBtn: {
+    flex: 1,
+    minHeight: 48,
     borderRadius: 14,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  primaryLabel: { fontFamily: theme.fonts.title, textTransform: 'uppercase', letterSpacing: 1, fontSize: 12 },
-  secondaryBtn: {
-    minHeight: 46,
-    borderRadius: 12,
-    borderWidth: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+  actionText: {
+    fontFamily: theme.fonts.title,
+    fontSize: 11,
+    textTransform: 'uppercase',
+    letterSpacing: 0.9,
   },
-  secondaryLabel: { fontFamily: theme.fonts.title, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.8 },
-  error: { marginTop: 10, fontFamily: theme.fonts.body },
 });

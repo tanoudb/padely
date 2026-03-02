@@ -1,97 +1,30 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, Share, StyleSheet, Switch, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Animated, {
-  Easing,
-  useAnimatedStyle,
-  useSharedValue,
-  withSequence,
-  withSpring,
-  withTiming,
-} from 'react-native-reanimated';
 import { api } from '../api/client';
 import { Card } from '../components/Card';
-import { EmptyState } from '../components/EmptyState';
-import { Skeleton } from '../components/Skeleton';
-import { AnimatedView, useCountUp, useScaleBounce, useStaggeredEntry } from '../hooks/usePadelyAnimations';
+import { PlayerCard } from '../components/PlayerCard';
 import { useI18n } from '../state/i18n';
 import { useSession } from '../state/session';
 import { useUi } from '../state/ui';
 import { theme } from '../theme';
 
-const PERIODS = ['week', 'month', 'season', 'all'];
-const TIER_COLORS = {
-  bronze: '#CD7F32',
-  silver: '#C0C0C0',
-  gold: '#FFD700',
-  mythic: '#9B59B6',
-};
-const BADGE_FALLBACK = [
-  { key: 'first_blood', title: 'First Blood', description: 'Valider ton premier match.' },
-  { key: 'serial_winner', title: 'Serial Winner', description: '6 victoires consecutives.' },
-  { key: 'ironman', title: 'Ironman', description: '30 matchs valides.' },
-  { key: 'upset_king', title: 'Upset King', description: 'Upset de 180+ points.' },
-  { key: 'golden_touch', title: 'Golden Touch', description: '15 puntos de oro.' },
-  { key: 'social_butterfly', title: 'Social Butterfly', description: 'Reseau local actif.' },
-  { key: 'city_champion', title: 'City Champion', description: 'Top 1 de ta ville.' },
-  { key: 'marathon_man', title: 'Marathon Man', description: '15h de jeu ou 5 marathons.' },
-];
+function Heatmap({ items = [], palette }) {
+  const weeks = [];
+  for (let i = 0; i < items.length; i += 1) {
+    const week = Math.floor(i / 7);
+    if (!weeks[week]) {
+      weeks[week] = [];
+    }
+    weeks[week].push(items[i]);
+  }
 
-function rankFromRating(rating) {
-  if (rating >= 2100) return 'Or I';
-  if (rating >= 1800) return 'Argent II';
-  if (rating >= 1500) return 'Argent I';
-  if (rating >= 1400) return 'Bronze V';
-  if (rating >= 1300) return 'Bronze IV';
-  if (rating >= 1200) return 'Bronze II';
-  return 'Bronze I';
-}
-
-function periodLabel(period, t) {
-  if (period === 'week') return t('profile.periodWeek');
-  if (period === 'month') return t('profile.periodMonth');
-  if (period === 'season') return t('profile.periodSeason');
-  return t('profile.periodAll');
-}
-
-function isUnauthorizedErrorMessage(message) {
-  const raw = String(message ?? '').toLowerCase();
-  return raw.includes('authentication required')
-    || raw.includes('unauthorized')
-    || raw.includes('missing auth token')
-    || raw.includes('invalid token')
-    || raw.includes('session expiree');
-}
-
-function StatLine({ label, value, palette }) {
-  return (
-    <View style={[styles.line, { borderBottomColor: palette.line }]}>
-      <Text style={[styles.label, { color: palette.textSecondary }]}>{label}</Text>
-      <Text style={[styles.value, { color: palette.text }]}>{value}</Text>
-    </View>
-  );
-}
-
-function Heatmap({ items, palette }) {
-  const weeks = useMemo(() => {
-    const buckets = [];
-    const safe = Array.isArray(items) ? items : [];
-    safe.forEach((item, index) => {
-      const week = Math.floor(index / 7);
-      if (!buckets[week]) {
-        buckets[week] = [];
-      }
-      buckets[week].push(item);
-    });
-    return buckets;
-  }, [items]);
-
-  function colorFor(level) {
+  function color(level) {
     if (!level) return palette.accentMuted;
     if (level === 1) return palette.accentMuted;
     if (level === 2) return palette.accent;
     if (level === 3) return palette.accent2;
-    return palette.accentLight ?? palette.accent;
+    return palette.accentLight;
   }
 
   return (
@@ -104,7 +37,7 @@ function Heatmap({ items, palette }) {
               style={[
                 styles.heatCell,
                 {
-                  backgroundColor: colorFor(item.intensity),
+                  backgroundColor: color(item.intensity),
                   borderColor: palette.line,
                 },
               ]}
@@ -116,706 +49,276 @@ function Heatmap({ items, palette }) {
   );
 }
 
-function BadgeUnlockOverlay({ badge, palette }) {
-  const reveal = useSharedValue(0);
-  const pulse = useSharedValue(0);
-
-  useEffect(() => {
-    if (!badge) {
-      reveal.value = withTiming(0, { duration: 180 });
-      return;
-    }
-    reveal.value = 0;
-    pulse.value = 0;
-    reveal.value = withSpring(1, { damping: 15, stiffness: 150, mass: 0.8 });
-    pulse.value = withSequence(
-      withTiming(1, { duration: 450, easing: Easing.out(Easing.cubic) }),
-      withTiming(0, { duration: 350, easing: Easing.inOut(Easing.quad) }),
-      withTiming(1, { duration: 360, easing: Easing.out(Easing.cubic) }),
-    );
-  }, [badge, pulse, reveal]);
-
-  const wrapStyle = useAnimatedStyle(() => ({
-    opacity: reveal.value,
-    transform: [
-      { translateY: (1 - reveal.value) * -26 },
-      { scale: 0.96 + reveal.value * 0.04 },
-    ],
-  }));
-
-  const sparkleStyle = useAnimatedStyle(() => ({
-    opacity: pulse.value * 0.95,
-    transform: [{ scale: 0.6 + pulse.value * 0.55 }],
-  }));
-
-  if (!badge) {
-    return null;
-  }
-
-  return (
-    <Animated.View style={[styles.unlockOverlay, wrapStyle, { backgroundColor: palette.bgElevated ?? palette.card, borderColor: palette.accent }]}>
-      <Animated.View style={[styles.sparkleA, sparkleStyle, { backgroundColor: palette.accent }]} />
-      <Animated.View style={[styles.sparkleB, sparkleStyle, { backgroundColor: palette.accent2 }]} />
-      <Animated.View style={[styles.sparkleC, sparkleStyle, { backgroundColor: palette.accent }]} />
-      <Text style={[styles.unlockKicker, { color: palette.accent }]}>NOUVEAU BADGE</Text>
-      <Text style={[styles.unlockTitle, { color: palette.text }]}>{badge.title}</Text>
-      <Text style={[styles.unlockSub, { color: palette.textSecondary }]} numberOfLines={2}>{badge.description}</Text>
-    </Animated.View>
-  );
-}
-
-function BadgeGrid({ catalog, palette, t, statsByKey, pinnedBadges, onTogglePin }) {
-  const rows = Array.isArray(catalog) && catalog.length ? catalog : BADGE_FALLBACK;
-  return (
-    <View style={styles.badgeGrid}>
-      {rows.map((badge) => {
-        const unlocked = Boolean(badge.unlocked);
-        const tier = String(badge.tier ?? '').toLowerCase();
-        const tierColor = TIER_COLORS[tier] ?? palette.muted;
-        const hiddenLocked = Boolean(badge.hiddenLocked);
-        const percentByTier = Number(statsByKey?.[badge.key]?.[tier] ?? 0);
-        const isPinned = pinnedBadges.includes(badge.key);
-        return (
-          <View
-            key={badge.key}
-            style={[
-              styles.badgeCell,
-              {
-                backgroundColor: unlocked ? palette.accentMuted : palette.bgAlt,
-                borderColor: unlocked ? palette.accent : palette.line,
-                shadowColor: unlocked ? palette.accent : 'transparent',
-                opacity: unlocked ? 1 : 0.8,
-              },
-            ]}
-          >
-            <Text style={[styles.badgeCellTitle, { color: unlocked ? (hiddenLocked ? palette.textSecondary : palette.accent) : palette.textSecondary }]} numberOfLines={2}>
-              {hiddenLocked ? '???' : badge.title}
-            </Text>
-            <Text style={[styles.badgeCellDesc, { color: palette.textSecondary }]} numberOfLines={3}>
-              {hiddenLocked ? t('badge.secretLocked') : (badge.description ?? '')}
-            </Text>
-            <Text style={[styles.badgeCellState, { color: unlocked ? tierColor : palette.muted }]}>
-              {unlocked ? t(`badge.tier.${tier}`) : t('badge.locked')}
-            </Text>
-            {unlocked ? (
-              <Text style={[styles.badgePercent, { color: palette.textSecondary }]}>
-                {t('badge.percentGlobal', { percent: percentByTier.toFixed(1) })}
-              </Text>
-            ) : null}
-            {badge?.nextTier?.progressPercent !== undefined && unlocked ? (
-              <View style={[styles.progressTrack, { backgroundColor: palette.bgAlt, borderColor: palette.line }]}>
-                <View style={[styles.progressFill, { width: `${Math.max(4, Math.min(100, badge.nextTier.progressPercent))}%`, backgroundColor: palette.accent }]} />
-              </View>
-            ) : null}
-            <Pressable style={[styles.pinBtn, { borderColor: palette.line }]} onPress={() => onTogglePin(badge.key)}>
-              <Text style={[styles.pinBtnText, { color: isPinned ? palette.accent : palette.textSecondary }]}>
-                {isPinned ? t('badge.pinnedShort') : t('badge.pinShort')}
-              </Text>
-            </Pressable>
-          </View>
-        );
-      })}
-    </View>
-  );
+function tierColor(tier, palette) {
+  const key = String(tier ?? '').toLowerCase();
+  if (key === 'bronze') return palette.tierBronze;
+  if (key === 'silver') return palette.tierSilver;
+  if (key === 'gold') return palette.tierGold;
+  if (key === 'mythic') return palette.tierMythic;
+  return palette.lineStrong ?? palette.line;
 }
 
 export function ProfileScreen() {
   const insets = useSafeAreaInsets();
-  const { token, user, logout } = useSession();
+  const { token, user, updateSettings } = useSession();
   const { t } = useI18n();
   const { palette } = useUi();
 
-  const [dashboard, setDashboard] = useState(null);
-  const [playerProfilePack, setPlayerProfilePack] = useState(null);
-  const [badgeStats, setBadgeStats] = useState(null);
-  const [duos, setDuos] = useState([]);
-  const [duoSummary, setDuoSummary] = useState(null);
-  const [players, setPlayers] = useState([]);
-  const [records, setRecords] = useState(null);
-  const [period, setPeriod] = useState('season');
-  const [loadError, setLoadError] = useState('');
-  const [badges, setBadges] = useState(BADGE_FALLBACK);
-  const [pinnedBadges, setPinnedBadges] = useState(Array.isArray(user?.settings?.pinnedBadges) ? user.settings.pinnedBadges : []);
-  const [unlockQueue, setUnlockQueue] = useState([]);
-  const [activeUnlock, setActiveUnlock] = useState(null);
-
-  const [view, setView] = useState('profile');
+  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState('');
+  const [dashboard, setDashboard] = useState(null);
+  const [records, setRecords] = useState(null);
+  const [badgesPack, setBadgesPack] = useState(null);
+  const [profilePack, setProfilePack] = useState(null);
+  const [publicProfileEnabled, setPublicProfileEnabled] = useState(Boolean(user?.privacy?.publicProfile ?? true));
+  const [privacySaving, setPrivacySaving] = useState(false);
 
-  async function loadProfileData() {
-    setLoadError('');
-    try {
-      const [db, profilePack, duoStats, playerList, recordsOut, badgeOut, badgeStatsOut] = await Promise.all([
-        api.dashboard(token, user.id, period),
-        api.playerProfile(token),
-        api.duoStats(token, user.id, period),
-        api.listPlayers(token),
-        api.records(token, user.id, period),
-        api.badges(token, user.id),
-        api.badgeStats(token),
-      ]);
-      setDashboard(db);
-      setPlayerProfilePack(profilePack);
-      setDuos(Array.isArray(duoStats?.rows) ? duoStats.rows : []);
-      setDuoSummary(duoStats?.bestDuo ?? null);
-      setPlayers(playerList);
-      setRecords(recordsOut);
-      setBadges(Array.isArray(badgeOut?.catalog) && badgeOut.catalog.length ? badgeOut.catalog : BADGE_FALLBACK);
-      setBadgeStats(badgeStatsOut);
-      if (Array.isArray(badgeOut?.newlyUnlocked) && badgeOut.newlyUnlocked.length) {
-        setUnlockQueue((current) => {
-          const seen = new Set(current.map((entry) => `${entry.badgeKey}:${entry.unlockedAt}`));
-          const appended = badgeOut.newlyUnlocked
-            .filter((entry) => !seen.has(`${entry.badgeKey}:${entry.unlockedAt}`))
-            .map((entry) => ({
-              ...entry,
-              description: (badgeOut.catalog ?? BADGE_FALLBACK).find((item) => item.key === entry.badgeKey)?.description ?? '',
-            }));
-          return [...current, ...appended];
-        });
-      }
-    } catch (e) {
-      const message = e.message || 'Impossible de charger le profil.';
-      if (isUnauthorizedErrorMessage(message)) {
-        logout();
-        return;
-      }
-      setLoadError(message);
-    }
-  }
-
-  async function togglePinnedBadge(badgeKey) {
-    let next = [];
-    setPinnedBadges((current) => {
-      if (current.includes(badgeKey)) {
-        next = current.filter((key) => key !== badgeKey);
-      } else {
-        next = [...current, badgeKey].slice(-3);
-      }
-      return next;
-    });
-    try {
-      await api.updatePinnedBadges(token, next);
-    } catch {
-      await loadProfileData();
-    }
+  async function load() {
+    const [db, rec, badges, profile] = await Promise.all([
+      api.dashboard(token, user.id, 'all'),
+      api.records(token, user.id, 'all'),
+      api.badges(token, user.id),
+      api.playerProfile(token),
+    ]);
+    setDashboard(db);
+    setRecords(rec);
+    setBadgesPack(badges);
+    setProfilePack(profile);
   }
 
   useEffect(() => {
-    loadProfileData().catch(() => {});
-  }, [token, user.id, period]);
+    let active = true;
+    setLoading(true);
+    setError('');
+    load().catch((e) => {
+      if (!active) return;
+      setError(e.message);
+    }).finally(() => {
+      if (!active) return;
+      setLoading(false);
+    });
+    return () => {
+      active = false;
+    };
+  }, [token, user.id]);
 
   useEffect(() => {
-    if (activeUnlock || unlockQueue.length === 0) {
-      return;
-    }
-    const next = unlockQueue[0];
-    setActiveUnlock(next);
-    setUnlockQueue((current) => current.slice(1));
-    const timer = setTimeout(() => {
-      setActiveUnlock(null);
-    }, 2600);
-    return () => clearTimeout(timer);
-  }, [activeUnlock, unlockQueue]);
-
-  const playersById = useMemo(() => {
-    const map = new Map();
-    for (const p of players) {
-      map.set(p.id, p);
-    }
-    return map;
-  }, [players]);
-
-  const sortedDuos = [...duos].sort((a, b) => {
-    if (b.winRate !== a.winRate) return b.winRate - a.winRate;
-    return b.matches - a.matches;
-  });
-
-  const bestDuo = duoSummary ?? sortedDuos[0] ?? null;
-  const rating = dashboard?.rating ?? user.rating ?? 1200;
-  const pir = dashboard?.pir ?? user.pir ?? 50;
-  const formScore = Number(playerProfilePack?.playerProfile?.formScore ?? dashboard?.form?.score ?? 0);
-  const playerProfileType = playerProfilePack?.playerProfile?.type ?? dashboard?.playerProfileType ?? 'regular';
-  const personality = playerProfilePack?.playerProfile?.personality ?? null;
-  const playerRhythm = dashboard?.playerRhythm ?? user.settings?.playerRhythm ?? 'regular';
-  const smartStreak = playerProfilePack?.playerProfile?.activityStreak ?? dashboard?.smartStreak ?? null;
-  const streakUnit = smartStreak?.unit ?? 'day';
-  const streakCount = Number(smartStreak?.count ?? 0);
-  const adaptiveObjective = playerProfilePack?.playerProfile?.objective ?? dashboard?.adaptiveObjective ?? null;
-  const returnMode = playerProfilePack?.playerProfile?.comebackMode ?? dashboard?.returnMode ?? null;
-  const latestMatchInsight = dashboard?.latestMatchInsight ?? null;
-  const narrativePhase = dashboard?.narrativePhase ?? 'nouveau_cap';
-  const rivalries = Array.isArray(playerProfilePack?.playerProfile?.rivalries) ? playerProfilePack.playerProfile.rivalries : [];
-  const progressionTimeline = (dashboard?.progression ?? [])
-    .slice(-4)
-    .reverse()
-    .map((item) => ({
-      at: item?.at ?? null,
-      delta: Number(item?.delta ?? 0),
-      pir: Number(item?.pir ?? item?.rating ?? 0),
-    }));
-  const streakLabel = streakUnit === 'month'
-    ? t('profile.streakMonths')
-    : streakUnit === 'week'
-      ? t('profile.streakWeeks')
-      : streakUnit === 'window'
-        ? t('profile.streakWindows')
-        : t('profile.streakDays');
-  const objectiveLine = adaptiveObjective?.type
-    ? t('profile.objectiveProgressSimple', {
-      current: adaptiveObjective.current ?? 0,
-      target: adaptiveObjective.target ?? 0,
-    })
-    : adaptiveObjective?.mode === 'return'
-      ? t('profile.objectiveReturn', { count: adaptiveObjective.targetActivities, days: adaptiveObjective.windowDays })
-      : adaptiveObjective?.mode === 'chase'
-        ? t('profile.objectiveChase', { count: adaptiveObjective.remainingActivities, days: adaptiveObjective.windowDays })
-        : adaptiveObjective
-          ? t('profile.objectiveMaintain', { count: adaptiveObjective.targetActivities, days: adaptiveObjective.windowDays })
-          : t('profile.objectiveFallback');
-  const momentLine = (latestMatchInsight?.momentTags ?? [])
-    .map((tag) => t(`profile.moment_${tag}`))
-    .filter(Boolean)
-    .slice(0, 3)
-    .join(' · ');
-  const isLoading = !dashboard && !records;
-  const badgeStatsByKey = useMemo(() => {
-    const map = {};
-    for (const row of badgeStats?.badges ?? []) {
-      map[row.key] = {};
-      for (const tierRow of row.tiers ?? []) {
-        map[row.key][tierRow.tier] = Number(tierRow.percent ?? 0);
-      }
-    }
-    return map;
-  }, [badgeStats]);
-  const pirLive = useCountUp(pir);
-  const ratingLive = useCountUp(rating);
-  const identityEntry = useStaggeredEntry(0, !isLoading);
-  const momentumEntry = useStaggeredEntry(1, !isLoading);
-  const statsEntry = useStaggeredEntry(2, !isLoading);
-  const recordsEntry = useStaggeredEntry(3, !isLoading);
-  const badgesEntry = useStaggeredEntry(4, !isLoading);
-  const heatmapEntry = useStaggeredEntry(5, !isLoading);
-  const ctaEntry = useStaggeredEntry(6, !isLoading);
-  const ctaBounce = useScaleBounce(sortedDuos.length);
-  const initials = (user.displayName ?? 'P').slice(0, 2).toUpperCase();
-  const arcadeTag = user.arcadeTag ?? `${(user.displayName ?? 'PLAYER').replace(/\s+/g, '').slice(0, 7).toUpperCase()}#${String(user.id ?? '').slice(-4).toUpperCase()}`;
-
-  async function shareArcadeTag() {
-    await Share.share({
-      title: t('profile.shareQr'),
-      message: `Ajoute-moi sur Padely: ${arcadeTag}\nQR: padely://arcade/${encodeURIComponent(arcadeTag)}`,
-    });
-  }
+    setPublicProfileEnabled(Boolean(user?.privacy?.publicProfile ?? true));
+  }, [user?.privacy?.publicProfile]);
 
   async function onRefresh() {
     setRefreshing(true);
+    setError('');
     try {
-      await loadProfileData();
+      await load();
+    } catch (e) {
+      setError(e.message);
     } finally {
       setRefreshing(false);
     }
   }
 
-  if (view === 'partners') {
-    return (
-      <ScrollView
-        style={[styles.root, { backgroundColor: palette.bg }]}
-        contentContainerStyle={[styles.content, { paddingTop: Math.max(insets.top + 8, 24) }]}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.accent2} />}
-      >
-        <View style={styles.headerRow}>
-          <Pressable style={[styles.backBtn, { backgroundColor: palette.cardStrong }]} onPress={() => setView('profile')}>
-            <Text style={[styles.backBtnText, { color: palette.text }]}>{t('profile.backProfile')}</Text>
-          </Pressable>
-          <Text style={[styles.h1, { color: palette.text }]} numberOfLines={1}>{t('profile.partnersTitle')}</Text>
-        </View>
+  const profile = profilePack?.playerProfile ?? {};
+  const allBadges = Array.isArray(badgesPack?.catalog) ? badgesPack.catalog : [];
+  const unlocked = allBadges.filter((item) => item.unlocked);
+  const pinnedKeys = Array.isArray(user?.settings?.pinnedBadges) ? user.settings.pinnedBadges : [];
+  const pinnedBadges = pinnedKeys
+    .map((key) => unlocked.find((badge) => badge.key === key))
+    .filter(Boolean)
+    .slice(0, 3);
+  const fallbackPins = unlocked.slice(0, 3 - pinnedBadges.length);
+  const cardBadges = [...pinnedBadges, ...fallbackPins].slice(0, 3);
 
-        <Card elevated>
-          <Text style={[styles.cardTitle, { color: palette.text }]}>{t('profile.bestSynergy')}</Text>
-          {bestDuo ? (
-            <>
-              <Text style={[styles.bestName, { color: palette.accent }]}>{playersById.get(bestDuo.partnerId)?.displayName ?? bestDuo.partnerId}</Text>
-              <Text style={[styles.meta, { color: palette.textSecondary }]}>{t('profile.winRate', { rate: bestDuo.winRate })}</Text>
-              <Text style={[styles.meta, { color: palette.textSecondary }]}>{t('profile.avgDistance', { distance: bestDuo.averageDistanceKm })}</Text>
-              <Text style={[styles.meta, { color: palette.textSecondary }]}>{t('profile.matchesTogether', { matches: bestDuo.matches })}</Text>
-              {!!bestDuo.message ? <Text style={[styles.meta, { color: palette.accent }]}>{bestDuo.message}</Text> : null}
-              {!!bestDuo.suggestion ? <Text style={[styles.meta, { color: palette.accent2 }]}>{bestDuo.suggestion}</Text> : null}
-            </>
-          ) : (
-            <EmptyState title={t('profile.emptyPartnersTitle')} body={t('profile.emptyPartnersBody')} variant="profile" compact />
-          )}
-        </Card>
+  const pirDna = useMemo(() => ({
+    power: Number(dashboard?.records?.biggestUpset?.ratingGap ?? 30),
+    stamina: Number(dashboard?.regularityScore ?? 45),
+    clutch: Number(dashboard?.consistencyScore ?? 45),
+    consistency: Number(dashboard?.consistencyScore ?? 45),
+    social: Math.min(100, Number((user?.friends ?? []).length * 8)),
+  }), [dashboard?.consistencyScore, dashboard?.records?.biggestUpset?.ratingGap, dashboard?.regularityScore, user?.friends]);
 
-        <Card>
-          <Text style={[styles.cardTitle, { color: palette.text }]}>{t('profile.allPairs')}</Text>
-          {sortedDuos.length === 0 ? (
-            <EmptyState title={t('profile.emptyPartnersTitle')} body={t('profile.allPairsEmpty')} variant="profile" compact />
-          ) : sortedDuos.map((item) => (
-            <View key={item.partnerId} style={[styles.duoRow, { borderBottomColor: palette.line }]}>
-              <View>
-                <Text style={[styles.duoName, { color: palette.text }]}>{playersById.get(item.partnerId)?.displayName ?? item.partnerId}</Text>
-                <Text style={[styles.meta, { color: palette.textSecondary }]}>{t('profile.pairSummary', { matches: item.matches, distance: item.totalDistanceKm })}</Text>
-              </View>
-              <Text style={[styles.duoRate, { color: palette.accent2 }]}>{item.winRate}%</Text>
-            </View>
-          ))}
-        </Card>
-      </ScrollView>
-    );
+  async function sharePlayerCard() {
+    const message = [
+      'PADELY',
+      `${user.displayName} · ${user.arcadeTag ?? ''}`,
+      t('home.formScore', { score: Math.round(Number(profile?.formScore ?? 0)) }),
+      `PIR ${Math.round(Number(dashboard?.pir ?? user?.pir ?? 0))}`,
+      t(`profile.type.${profile?.type ?? 'regular'}`),
+      profile?.personality ? t(`profile.personality.${profile.personality}`) : '',
+    ].filter(Boolean).join('\n');
+
+    await Share.share({
+      title: 'Padely',
+      message,
+    });
+  }
+
+  async function savePrivacy() {
+    setPrivacySaving(true);
+    setError('');
+    try {
+      await updateSettings({
+        privacy: {
+          publicProfile: publicProfileEnabled,
+        },
+      });
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setPrivacySaving(false);
+    }
   }
 
   return (
     <ScrollView
       style={[styles.root, { backgroundColor: palette.bg }]}
-      contentContainerStyle={[styles.content, { paddingTop: Math.max(insets.top + 8, 24) }]}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.accent2} />}
+      contentContainerStyle={[styles.content, { paddingTop: Math.max(insets.top + 10, 24) }]}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.accent} />}
     >
-      <View style={styles.header}>
-        <Text style={[styles.eyebrow, { color: palette.accent2 }]}>{t('profile.space')}</Text>
-        <Text style={[styles.h1, { color: palette.text }]} numberOfLines={1}>{t('profile.title')}</Text>
-        <Text style={[styles.pitch, { color: palette.textSecondary }]}>{t('profile.pitch')}</Text>
-      </View>
+      <Text style={[styles.title, { color: palette.text }]}>{t('profile.title')}</Text>
 
-      <View style={styles.periodRow}>
-        {PERIODS.map((key) => {
-          const active = key === period;
-          return (
-            <Pressable
-              key={key}
-              style={[
-                styles.periodBtn,
-                {
-                  borderColor: active ? palette.accent : palette.line,
-                  backgroundColor: active ? palette.accentMuted : palette.card,
-                },
-              ]}
-              onPress={() => setPeriod(key)}
-            >
-              <Text style={[styles.periodText, { color: active ? palette.accent : palette.textSecondary }]}>{periodLabel(key, t)}</Text>
-            </Pressable>
-          );
-        })}
-      </View>
+      {loading ? (
+        <Card elevated>
+          <Text style={[styles.meta, { color: palette.textSecondary }]}>{t('profile.loading')}</Text>
+        </Card>
+      ) : null}
 
-      {isLoading && !loadError ? (
+      {!!error && !loading ? (
+        <Card elevated>
+          <Text style={[styles.meta, { color: palette.danger }]}>{error}</Text>
+        </Card>
+      ) : null}
+
+      {!loading && !error ? (
         <>
-          <Card elevated style={styles.identityCard}>
-            <Skeleton width={72} height={72} radius={36} />
-            <View style={styles.identityInfo}>
-              <Skeleton width="68%" height={18} />
-              <Skeleton width="40%" height={14} />
-              <Skeleton width="88%" height={12} />
-              <Skeleton width={120} height={34} radius={9} style={{ marginTop: 8 }} />
+          <View style={styles.heroCardWrap}>
+            <PlayerCard
+              player={{ displayName: user.displayName, arcadeTag: user.arcadeTag }}
+              pir={dashboard?.pir ?? user?.pir}
+              rating={dashboard?.rating ?? user?.rating}
+              formScore={profile?.formScore ?? 0}
+              personality={profile?.personality}
+              type={profile?.type}
+              pinnedBadges={cardBadges}
+              pirDna={pirDna}
+              size="large"
+            />
+            <Pressable style={[styles.shareBtn, { backgroundColor: palette.accent }]} onPress={sharePlayerCard}>
+              <Text style={[styles.shareBtnText, { color: palette.accentText }]}>{t('profile.shareCard')}</Text>
+            </Pressable>
+          </View>
+
+          <Card>
+            <Text style={[styles.sectionTitle, { color: palette.text }]}>{t('profile.rivalriesTitle')}</Text>
+            {(profile?.rivalries ?? []).slice(0, 3).map((row) => (
+              <View key={row.opponentId} style={[styles.line, { borderBottomColor: palette.line }]}> 
+                <Text style={[styles.meta, { color: palette.textSecondary }]}>{t('profile.vsLabel', { name: row.opponentId })}</Text>
+                <Text style={[styles.value, { color: palette.text }]}>{row.wins}-{row.losses}</Text>
+              </View>
+            ))}
+            {!(profile?.rivalries ?? []).length ? <Text style={[styles.meta, { color: palette.textSecondary }]}>{t('profile.rivalriesEmpty')}</Text> : null}
+          </Card>
+
+          <Card>
+            <Text style={[styles.sectionTitle, { color: palette.text }]}>{t('profile.recordsTitle')}</Text>
+            <View style={[styles.line, { borderBottomColor: palette.line }]}>
+              <Text style={[styles.meta, { color: palette.textSecondary }]}>{t('profile.recordUpset')}</Text>
+              <Text style={[styles.value, { color: palette.text }]}>{records?.records?.biggestUpset?.ratingGap ?? 0}</Text>
+            </View>
+            <View style={[styles.line, { borderBottomColor: palette.line }]}>
+              <Text style={[styles.meta, { color: palette.textSecondary }]}>{t('profile.recordStreak')}</Text>
+              <Text style={[styles.value, { color: palette.text }]}>{records?.records?.bestWinStreak ?? 0}</Text>
+            </View>
+            <View style={[styles.line, { borderBottomColor: palette.line }]}>
+              <Text style={[styles.meta, { color: palette.textSecondary }]}>{t('profile.recordLongest')}</Text>
+              <Text style={[styles.value, { color: palette.text }]}>{records?.records?.longestMatch?.minutes ?? 0}m</Text>
             </View>
           </Card>
+
           <Card>
-            <Skeleton width={160} height={14} />
-            <Skeleton width="100%" height={12} style={{ marginTop: 10 }} />
-            <Skeleton width="100%" height={12} style={{ marginTop: 10 }} />
-            <Skeleton width="100%" height={12} style={{ marginTop: 10 }} />
+            <Text style={[styles.sectionTitle, { color: palette.text }]}>{t('profile.heatmapTitle')}</Text>
+            <Heatmap items={records?.activityHeatmap ?? []} palette={palette} />
           </Card>
+
           <Card>
-            <Skeleton width={140} height={14} />
-            <Skeleton width="100%" height={118} radius={14} style={{ marginTop: 10 }} />
-          </Card>
-        </>
-      ) : loadError ? (
-        <Card elevated>
-          <Text style={[styles.cardTitle, { color: palette.text }]}>{t('home.loadErrorTitle')}</Text>
-          <Text style={[styles.meta, { color: palette.textSecondary }]}>{loadError}</Text>
-          <Pressable style={[styles.cta, { backgroundColor: palette.accent, marginTop: 12 }]} onPress={onRefresh}>
-            <Text style={[styles.ctaText, { color: palette.accentText }]}>{t('home.retry')}</Text>
-          </Pressable>
-        </Card>
-      ) : (
-        <>
-          <AnimatedView style={identityEntry}>
-            <Card elevated style={styles.identityCard}>
-              <View style={[styles.avatarCircle, { backgroundColor: palette.cardStrong, borderColor: palette.lineStrong ?? palette.line }]}>
-                <Text style={[styles.avatarText, { color: palette.text }]}>{initials}</Text>
-              </View>
-              <View style={styles.identityInfo}>
-                <Text style={[styles.playerName, { color: palette.text }]}>{user.displayName}</Text>
-                <Text style={[styles.rankText, { color: palette.accent }]}>{rankFromRating(rating)}</Text>
-                <Text style={[styles.meta, { color: palette.textSecondary }]}>{t('profile.rankLine', { pir: pirLive, rating: ratingLive })}</Text>
-                <Text style={[styles.meta, { color: palette.textSecondary }]}>{t('profile.arcadeTag', { tag: arcadeTag })}</Text>
-                {!!pinnedBadges.length ? (
-                  <Text style={[styles.meta, { color: palette.accent }]}>
-                    {t('badge.pinned')}: {pinnedBadges.join(' · ')}
+            <Text style={[styles.sectionTitle, { color: palette.text }]}>{t('profile.badgesTitle')}</Text>
+            <View style={styles.badgeGrid}>
+              {allBadges.slice(0, 16).map((badge) => (
+                <View
+                  key={badge.key}
+                  style={[
+                    styles.badgeCell,
+                    {
+                      borderColor: badge.unlocked ? tierColor(badge.tier, palette) : palette.line,
+                      backgroundColor: badge.unlocked ? palette.accentMuted : palette.bgAlt,
+                    },
+                  ]}
+                >
+                  <Text numberOfLines={2} style={[styles.badgeText, { color: badge.unlocked ? palette.text : palette.textSecondary }]}>
+                    {badge.hiddenLocked ? '???' : badge.title}
                   </Text>
-                ) : null}
-                <Pressable style={[styles.shareTagBtn, { borderColor: palette.line, backgroundColor: palette.cardStrong }]} onPress={shareArcadeTag}>
-                  <Text style={[styles.shareTagText, { color: palette.text }]}>{t('profile.shareQr')}</Text>
-                </Pressable>
-              </View>
-            </Card>
-          </AnimatedView>
+                </View>
+              ))}
+            </View>
+          </Card>
 
-          <AnimatedView style={momentumEntry}>
-            <Card elevated>
-              <Text style={[styles.cardTitle, { color: palette.text }]}>{t('profile.momentumTitle')}</Text>
-              <Text style={[styles.meta, { color: palette.textSecondary }]}>
-                {t('profile.formLine', {
-                  form: formScore,
-                  profile: t(`profile.type.${playerProfileType}`),
-                })}
+          <Card>
+            <Text style={[styles.sectionTitle, { color: palette.text }]}>{t('profile.privacy')}</Text>
+            <View style={styles.line}>
+              <Text style={[styles.meta, { color: palette.textSecondary }]}>{t('home.publicProfile')}</Text>
+              <Switch
+                value={publicProfileEnabled}
+                onValueChange={setPublicProfileEnabled}
+                thumbColor={publicProfileEnabled ? palette.accent : palette.muted}
+                trackColor={{ true: palette.accentMuted, false: palette.lineStrong ?? palette.line }}
+              />
+            </View>
+            <Pressable
+              style={[styles.shareBtn, { backgroundColor: palette.cardStrong, opacity: privacySaving ? 0.7 : 1 }]}
+              onPress={savePrivacy}
+              disabled={privacySaving}
+            >
+              <Text style={[styles.shareBtnText, { color: palette.text }]}>
+                {privacySaving ? t('onboarding.saving') : t('home.save')}
               </Text>
-              {personality ? (
-                <Text style={[styles.meta, { color: palette.accent }]}>
-                  {t('profile.personalityTitle')}: {t(`profile.personality.${personality}`)}
-                </Text>
-              ) : null}
-              <Text style={[styles.meta, { color: palette.textSecondary }]}>
-                {t('profile.rhythmLine', {
-                  rhythm: t(`profile.rhythm_${playerRhythm}`),
-                  count: streakCount,
-                  unit: streakLabel,
-                })}
-              </Text>
-              <Text style={[styles.meta, { color: palette.accent }]}>{objectiveLine}</Text>
-              {returnMode?.active ? (
-                <Text style={[styles.meta, { color: palette.accent2 }]}>
-                  {t('profile.returnModeLine', {
-                    days: returnMode.pauseDays ?? returnMode.daysSinceLastMatch ?? 0,
-                    bonus: returnMode.bonusForm ?? (returnMode.bonusApplied ? 1 : 0),
-                  })}
-                </Text>
-              ) : null}
-              {latestMatchInsight ? (
-                <Text style={[styles.meta, { color: palette.textSecondary }]}>
-                  {t('profile.latestMatchLine', {
-                    score: latestMatchInsight.score,
-                    importance: t(`profile.importance_${latestMatchInsight.importanceLabel}`),
-                  })}
-                </Text>
-              ) : null}
-              {momentLine ? (
-                <Text style={[styles.meta, { color: palette.accent }]}>{momentLine}</Text>
-              ) : null}
-              <Text style={[styles.meta, { color: palette.textSecondary }]}>
-                {t(`profile.narrative_${narrativePhase}`)}
-              </Text>
-              <View style={[styles.timelineBox, { borderColor: palette.line, backgroundColor: palette.bgAlt }]}>
-                {progressionTimeline.length ? progressionTimeline.map((entry, index) => (
-                  <View key={`${entry.at}_${index}`} style={[styles.timelineRow, { borderBottomColor: palette.line }]}>
-                    <Text style={[styles.timelineDate, { color: palette.textSecondary }]}>
-                      {entry.at ? new Date(entry.at).toLocaleDateString() : t('profile.timelineUnknown')}
-                    </Text>
-                    <Text style={[styles.timelineDelta, { color: entry.delta >= 0 ? palette.accent2 : palette.danger }]}>
-                      {entry.delta >= 0 ? `+${entry.delta}` : `${entry.delta}`}
-                    </Text>
-                  </View>
-                )) : (
-                  <Text style={[styles.meta, { color: palette.textSecondary }]}>{t('profile.timelineEmpty')}</Text>
-                )}
-              </View>
-            </Card>
-          </AnimatedView>
-
-          <AnimatedView style={statsEntry}>
-            <Card>
-              <Text style={[styles.cardTitle, { color: palette.text }]}>{t('profile.global')}</Text>
-              <StatLine label={t('profile.statWins')} value={dashboard?.wins ?? 0} palette={palette} />
-              <StatLine label={t('profile.statLosses')} value={dashboard?.losses ?? 0} palette={palette} />
-              <StatLine label={t('profile.statTotalDistance')} value={`${dashboard?.totalDistanceKm ?? 0} km`} palette={palette} />
-              <StatLine label={t('profile.statAverageDistance')} value={`${dashboard?.averageDistanceKm ?? 0} km/match`} palette={palette} />
-              <StatLine label={t('profile.statConsistency')} value={`${dashboard?.consistencyScore ?? 0}/100`} palette={palette} />
-              <StatLine label={t('profile.statRegularity')} value={`${dashboard?.regularityScore ?? 0}/100`} palette={palette} />
-            </Card>
-          </AnimatedView>
-
-          <AnimatedView style={recordsEntry}>
-            <Card>
-              <Text style={[styles.cardTitle, { color: palette.text }]}>{t('profile.recordsTitle')}</Text>
-              <StatLine label={t('profile.recordUpset')} value={`${records?.records?.biggestUpset?.ratingGap ?? 0} pts`} palette={palette} />
-              <StatLine label={t('profile.recordStreak')} value={`${records?.records?.bestWinStreak ?? 0}`} palette={palette} />
-              <StatLine label={t('profile.recordBestSet')} value={records?.records?.bestSet?.score ?? 'N/A'} palette={palette} />
-              <StatLine label={t('profile.recordLongest')} value={`${records?.records?.longestMatch?.minutes ?? 0} min`} palette={palette} />
-            </Card>
-          </AnimatedView>
-
-          <AnimatedView style={recordsEntry}>
-            <Card>
-              <Text style={[styles.cardTitle, { color: palette.text }]}>{t('profile.rivalriesTitle')}</Text>
-              {rivalries.length ? rivalries.slice(0, 3).map((row) => (
-                <StatLine
-                  key={row.opponentId}
-                  label={t('profile.vsLabel', { name: playersById.get(row.opponentId)?.displayName ?? row.opponentId })}
-                  value={`${row.wins}-${row.losses}`}
-                  palette={palette}
-                />
-              )) : <Text style={[styles.meta, { color: palette.textSecondary }]}>{t('profile.rivalriesEmpty')}</Text>}
-            </Card>
-          </AnimatedView>
-
-          <AnimatedView style={badgesEntry}>
-            <Card>
-              <Text style={[styles.cardTitle, { color: palette.text }]}>{t('profile.badgesTitle')}</Text>
-              {badges.length ? (
-                <BadgeGrid
-                  catalog={badges}
-                  palette={palette}
-                  t={t}
-                  statsByKey={badgeStatsByKey}
-                  pinnedBadges={pinnedBadges}
-                  onTogglePin={togglePinnedBadge}
-                />
-              ) : (
-                <EmptyState title={t('profile.emptyBadgeTitle')} body={t('profile.emptyBadgeBody')} variant="profile" compact />
-              )}
-            </Card>
-          </AnimatedView>
-
-          <AnimatedView style={heatmapEntry}>
-            <Card>
-              <Text style={[styles.cardTitle, { color: palette.text }]}>{t('profile.heatmapTitle')}</Text>
-              {(records?.activityHeatmap ?? dashboard?.activityHeatmap ?? []).length ? (
-                <Heatmap items={records?.activityHeatmap ?? dashboard?.activityHeatmap ?? []} palette={palette} />
-              ) : (
-                <EmptyState title={t('profile.emptyHeatmapTitle')} body={t('profile.emptyHeatmapBody')} variant="profile" compact />
-              )}
-            </Card>
-          </AnimatedView>
-
-          <AnimatedView style={[ctaEntry, ctaBounce]}>
-            <Pressable style={[styles.cta, { backgroundColor: palette.accent }]} onPress={() => setView('partners')}>
-              <Text style={[styles.ctaText, { color: palette.accentText }]}>{t('profile.seePartners')}</Text>
             </Pressable>
-          </AnimatedView>
+          </Card>
         </>
-      )}
-      <BadgeUnlockOverlay badge={activeUnlock} palette={palette} />
+      ) : null}
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: 'transparent' },
-  content: { padding: 16, gap: 12, paddingBottom: 24 },
-  header: { marginBottom: 4 },
-  headerRow: { marginBottom: 4, gap: 8 },
-  eyebrow: { fontFamily: theme.fonts.title, letterSpacing: 1, fontSize: 11 },
-  h1: { fontSize: 38, lineHeight: 40, fontFamily: theme.fonts.display },
-  pitch: { fontFamily: theme.fonts.body, fontSize: 13, marginTop: 2 },
-  periodRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
-  periodBtn: {
-    minHeight: 34,
-    paddingHorizontal: 11,
-    borderRadius: 10,
-    borderWidth: 1,
-    justifyContent: 'center',
-  },
-  periodText: {
-    fontFamily: theme.fonts.title,
-    fontSize: 12,
-    textTransform: 'uppercase',
-  },
-  identityCard: { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  avatarCircle: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-  },
-  avatarText: { fontFamily: theme.fonts.title, fontSize: 24 },
-  identityInfo: { flex: 1 },
-  playerName: { fontFamily: theme.fonts.title, fontSize: 24 },
-  rankText: { fontFamily: theme.fonts.title, fontSize: 16 },
-  cardTitle: { fontFamily: theme.fonts.title, fontSize: 16, marginBottom: 8 },
+  root: { flex: 1 },
+  content: { padding: 16, gap: 12, paddingBottom: 28 },
+  title: { fontFamily: theme.fonts.display, fontSize: 36, lineHeight: 38 },
+  heroCardWrap: { gap: 10 },
+  sectionTitle: { fontFamily: theme.fonts.title, fontSize: 15, marginBottom: 8 },
   line: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    borderBottomWidth: 1,
-    paddingVertical: 7,
-  },
-  label: { fontFamily: theme.fonts.body },
-  value: { fontFamily: theme.fonts.title },
-  meta: { fontFamily: theme.fonts.body, marginTop: 2 },
-  timelineBox: {
-    marginTop: 10,
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    gap: 2,
-  },
-  timelineRow: {
-    minHeight: 28,
-    borderBottomWidth: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  timelineDate: {
-    fontFamily: theme.fonts.body,
-    fontSize: 12,
-  },
-  timelineDelta: {
-    fontFamily: theme.fonts.title,
-    fontSize: 12,
-  },
-  shareTagBtn: {
-    marginTop: 8,
     minHeight: 34,
-    borderRadius: 9,
-    borderWidth: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-  },
-  shareTagText: {
-    fontFamily: theme.fonts.title,
-    fontSize: 10,
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-  },
-  cta: {
-    minHeight: 54,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  ctaText: {
-    fontFamily: theme.fonts.title,
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-    fontSize: 12,
-  },
-  backBtn: {
-    alignSelf: 'flex-start',
-    minHeight: 34,
-    borderRadius: 8,
-    justifyContent: 'center',
-    paddingHorizontal: 10,
-  },
-  backBtnText: { fontFamily: theme.fonts.title, fontSize: 11, textTransform: 'uppercase' },
-  bestName: { fontFamily: theme.fonts.display, fontSize: 32, lineHeight: 34 },
-  duoRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
     borderBottomWidth: 1,
-    paddingVertical: 9,
-  },
-  duoName: { fontFamily: theme.fonts.title, fontSize: 14 },
-  duoRate: { fontFamily: theme.fonts.title, fontSize: 18 },
-  heatmapWrap: {
     flexDirection: 'row',
-    gap: 4,
-    marginTop: 8,
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
-  heatmapCol: {
-    gap: 4,
+  meta: { fontFamily: theme.fonts.body, fontSize: 12 },
+  value: { fontFamily: theme.fonts.title, fontSize: 13 },
+  heatmapWrap: { flexDirection: 'row', gap: 3, flexWrap: 'wrap' },
+  heatmapCol: { gap: 3 },
+  heatCell: { width: 10, height: 10, borderRadius: 3, borderWidth: 1 },
+  shareBtn: {
+    minHeight: 48,
+    borderRadius: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  heatCell: {
-    width: 11,
-    height: 11,
-    borderRadius: 3,
-    borderWidth: 1,
+  shareBtnText: {
+    fontFamily: theme.fonts.title,
+    fontSize: 12,
+    letterSpacing: 0.9,
+    textTransform: 'uppercase',
   },
   badgeGrid: {
     flexDirection: 'row',
@@ -824,112 +327,18 @@ const styles = StyleSheet.create({
   },
   badgeCell: {
     width: '23%',
-    minHeight: 132,
+    minHeight: 78,
     borderRadius: 12,
     borderWidth: 1,
-    paddingHorizontal: 7,
-    paddingVertical: 9,
-    justifyContent: 'space-between',
-    shadowOffset: { width: 0, height: 8 },
-    shadowRadius: 14,
-    shadowOpacity: 0.22,
-    elevation: 2,
-  },
-  badgeCellTitle: {
-    fontFamily: theme.fonts.title,
-    fontSize: 10,
-    letterSpacing: 0.35,
-    textTransform: 'uppercase',
-  },
-  badgeCellDesc: {
-    fontFamily: theme.fonts.body,
-    fontSize: 10,
-    lineHeight: 12,
-  },
-  badgeCellState: {
-    fontFamily: theme.fonts.title,
-    fontSize: 9,
-    letterSpacing: 0.5,
-  },
-  badgePercent: {
-    marginTop: 2,
-    fontFamily: theme.fonts.body,
-    fontSize: 9,
-    lineHeight: 11,
-  },
-  progressTrack: {
-    marginTop: 4,
-    height: 5,
-    borderRadius: 999,
-    borderWidth: 1,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    borderRadius: 999,
-  },
-  pinBtn: {
-    marginTop: 4,
-    minHeight: 20,
-    borderRadius: 999,
-    borderWidth: 1,
-    alignItems: 'center',
+    padding: 6,
     justifyContent: 'center',
+    alignItems: 'center',
   },
-  pinBtnText: {
+  badgeText: {
+    textAlign: 'center',
     fontFamily: theme.fonts.title,
-    fontSize: 11,
-    lineHeight: 13,
-  },
-  unlockOverlay: {
-    position: 'absolute',
-    left: 12,
-    right: 12,
-    top: 10,
-    borderWidth: 1,
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    zIndex: 20,
-  },
-  unlockKicker: {
-    fontFamily: theme.fonts.title,
-    fontSize: 11,
-    letterSpacing: 1.2,
-  },
-  unlockTitle: {
-    marginTop: 4,
-    fontFamily: theme.fonts.display,
-    fontSize: 21,
-    lineHeight: 24,
-  },
-  unlockSub: {
-    marginTop: 3,
-    fontFamily: theme.fonts.body,
-    fontSize: 12,
-  },
-  sparkleA: {
-    position: 'absolute',
-    width: 8,
-    height: 8,
-    borderRadius: 99,
-    top: 9,
-    right: 18,
-  },
-  sparkleB: {
-    position: 'absolute',
-    width: 6,
-    height: 6,
-    borderRadius: 99,
-    top: 24,
-    right: 34,
-  },
-  sparkleC: {
-    position: 'absolute',
-    width: 5,
-    height: 5,
-    borderRadius: 99,
-    top: 17,
-    right: 50,
+    fontSize: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
 });

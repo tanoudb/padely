@@ -53,6 +53,17 @@ import {
   runInactivityDecay,
   runSeasonSoftReset,
 } from './services/gamificationService.js';
+import {
+  addMembersToGroup,
+  createGroup,
+  getCommunityFeed,
+  joinGroup,
+  joinGroupByCode,
+  leaveGroup,
+  listGroupMessages,
+  listMyGroups,
+  postGroupMessage,
+} from './services/groupService.js';
 import { getSeasonsOverview } from './services/seasonService.js';
 import { createListing, listListings } from './services/marketplaceService.js';
 import {
@@ -490,6 +501,13 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, await getCrewOverview(me.id, city));
     }
 
+    if (req.method === 'GET' && url.pathname === '/api/v1/community/feed') {
+      const me = await requireAuth(req);
+      return json(res, 200, await getCommunityFeed(me.id, {
+        limit: maybeNumber(url.searchParams.get('limit')),
+      }));
+    }
+
     if (req.method === 'GET' && url.pathname === '/api/v1/community/unread') {
       const me = await requireAuth(req);
       return json(res, 200, await getUnreadSummary(me.id));
@@ -655,6 +673,90 @@ const server = http.createServer(async (req, res) => {
       await requireAuth(req);
       const payload = await readJson(req);
       return json(res, 200, await getBalancedProposals(payload.players ?? [], payload.maxResults ?? 5));
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/v1/groups') {
+      const me = await requireAuth(req);
+      const payload = await readJson(req);
+      return json(res, 201, await createGroup({
+        userId: me.id,
+        name: payload.name,
+        members: payload.members ?? [],
+        type: payload.type ?? 'private',
+      }));
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/v1/groups') {
+      const me = await requireAuth(req);
+      return json(res, 200, await listMyGroups(me.id));
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/v1/groups/join') {
+      const me = await requireAuth(req);
+      const payload = await readJson(req);
+      return json(res, 200, await joinGroupByCode({
+        userId: me.id,
+        clubCode: payload.clubCode,
+      }));
+    }
+
+    {
+      const params = pathMatch(url.pathname, '/api/v1/groups/:id/join');
+      if (req.method === 'POST' && params) {
+        const me = await requireAuth(req);
+        const payload = await readJson(req);
+        return json(res, 200, await joinGroup({
+          userId: me.id,
+          groupId: decodeURIComponent(params.id),
+          clubCode: payload.clubCode,
+        }));
+      }
+    }
+
+    {
+      const params = pathMatch(url.pathname, '/api/v1/groups/:id/leave');
+      if (req.method === 'POST' && params) {
+        const me = await requireAuth(req);
+        return json(res, 200, await leaveGroup({
+          userId: me.id,
+          groupId: decodeURIComponent(params.id),
+        }));
+      }
+    }
+
+    {
+      const params = pathMatch(url.pathname, '/api/v1/groups/:id/members');
+      if (req.method === 'POST' && params) {
+        const me = await requireAuth(req);
+        const payload = await readJson(req);
+        return json(res, 200, await addMembersToGroup({
+          userId: me.id,
+          groupId: decodeURIComponent(params.id),
+          members: payload.members ?? [],
+        }));
+      }
+    }
+
+    {
+      const params = pathMatch(url.pathname, '/api/v1/groups/:id/messages');
+      if (req.method === 'GET' && params) {
+        const me = await requireAuth(req);
+        return json(res, 200, await listGroupMessages({
+          userId: me.id,
+          groupId: decodeURIComponent(params.id),
+          limit: maybeNumber(url.searchParams.get('limit')),
+          before: url.searchParams.get('before') ?? undefined,
+        }));
+      }
+      if (req.method === 'POST' && params) {
+        const me = await requireAuth(req);
+        const payload = await readJson(req);
+        return json(res, 201, await postGroupMessage({
+          userId: me.id,
+          groupId: decodeURIComponent(params.id),
+          text: payload.text,
+        }));
+      }
     }
 
     if (req.method === 'POST' && url.pathname === '/api/v1/marketplace/listings') {

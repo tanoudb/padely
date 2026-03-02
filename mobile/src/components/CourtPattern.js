@@ -3,13 +3,25 @@ import { StyleSheet, View } from 'react-native';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
 import { useUi } from '../state/ui';
 
+function toRgba(hex, alpha) {
+  const value = String(hex ?? '').replace('#', '').trim();
+  if (value.length !== 6) {
+    return `rgba(0,0,0,${alpha})`;
+  }
+  const parsed = Number.parseInt(value, 16);
+  const r = (parsed >> 16) & 255;
+  const g = (parsed >> 8) & 255;
+  const b = parsed & 255;
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
 export function CourtPattern({ variant = 'home' }) {
   const { mode, palette } = useUi();
 
-  const lineColor = mode === 'day' ? 'rgba(23, 79, 59, 0.14)' : 'rgba(129, 190, 160, 0.16)';
-  const turfColor = mode === 'day' ? 'rgba(36, 150, 103, 0.08)' : 'rgba(44, 182, 125, 0.12)';
-  const clayColor = mode === 'day' ? 'rgba(198, 127, 58, 0.1)' : 'rgba(208, 138, 58, 0.14)';
-  const ballColor = mode === 'day' ? 'rgba(166, 196, 77, 0.15)' : 'rgba(166, 196, 77, 0.19)';
+  const lineColor = toRgba(palette.accent, mode === 'day' ? 0.16 : 0.2);
+  const turfColor = toRgba(palette.accent, mode === 'day' ? 0.05 : 0.08);
+  const clayColor = toRgba(palette.accentDark, mode === 'day' ? 0.08 : 0.11);
+  const ballColor = toRgba(palette.accent2, mode === 'day' ? 0.18 : 0.24);
 
   const topAccent = variant === 'community';
   const circleX = topAccent ? 12 : 88;

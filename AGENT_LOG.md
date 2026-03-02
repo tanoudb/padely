@@ -315,3 +315,21 @@ Exports mobile validés: `npx expo export --platform ios` et `npx expo export --
 ✅
 ### Prochaine mission recommandée
 Nettoyage des écrans legacy non routés (`PlayScreen`, `StatsScreen`, `PartnersScreen`) pour réduire la dette UI et centraliser définitivement les parcours sur les écrans `mobile/src/screens/play/*`.
+
+## [2026-03-02] — Run #20
+### Mission
+PADELY V2 — DESIGN PADEL + COMMUNAUTE SIMPLIFIEE + MATCH ANONYME
+### Résultat
+Le run consolide la direction produit demandee: onboarding simplifie a 2 etapes, setup match anonyme en 3 etapes, profil joueur valorisant avec carte Panini/FIFA reutilisable (large/compact), communaute en 3 tabs (Feed/Messages/Classement) et creation/join de groupes plus fiable.
+Le join club via code/QR est maintenant robuste sans dependre d une liste locale pre-chargee, et la confidentialite est simplifiee avec un toggle principal “Profil public” directement sur l ecran Profil.
+### Technique
+Backend: ajout du join club direct par code dans `backend/src/services/groupService.js` (`joinGroupByCode`) + route `POST /api/v1/groups/join` dans `backend/src/server.js`; test associe ajoute dans `backend/test/groupService.test.js`.
+Mobile: `mobile/src/api/client.js` enrichi (`joinGroupByCode`), `mobile/src/screens/CommunityScreen.js` corrige (join code, tabs/messages/feed labels i18n, compatibilite matchmaking), `mobile/src/screens/OnboardingScreen.js` remplace par un flow 2 etapes (niveau + ville), `mobile/src/screens/PlayerProfileScreen.js` refondu avec `PlayerCard` compact + i18n complet, `mobile/src/screens/ProfileScreen.js` enrichi avec toggle de confidentialite (profil public), `mobile/src/screens/play/PlayResultScreen.js` enrichi avec `PlayerCard` compact, `mobile/src/components/CourtPattern.js` converti en couleurs derivees de `palette.*`, `mobile/src/App.js` fallback couleur sans hardcode hex.
+i18n: ajout massif des cles FR/EN manquantes dans `mobile/src/i18n/dictionaries.js` pour onboarding simplifie, setup match 3 etapes, communaute 3 tabs, profil public joueur, PlayerCard, et messages associes.
+### Validation
+Backend tests verts: `48/48` via `npm test`.
+Exports mobile valides: `npx expo export --platform ios` et `npx expo export --platform android` OK.
+### Statut
+✅
+### Prochaine mission recommandée
+Affinage visuel final des ecrans gameplay (scoring/result) pour renforcer encore le contraste sport broadcast et harmoniser les micro-interactions (motion + haptics + hierarchy typographique).

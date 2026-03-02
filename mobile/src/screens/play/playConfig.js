@@ -57,7 +57,16 @@ export function slotToApiPlayer(slot) {
 
 export function slotDisplayName(slot, participants = {}) {
   if (!slot) return 'Joueur';
-  if (typeof slot === 'string') return participants[slot] ?? 'Joueur';
+  if (typeof slot === 'string') {
+    const participant = participants[slot];
+    if (participant && typeof participant === 'object') {
+      return participant.displayName ?? participant.name ?? 'Joueur';
+    }
+    if (typeof participant === 'string') {
+      return participant;
+    }
+    return 'Joueur';
+  }
   if (slot.kind === 'guest') return slot.guestName ?? 'Invite';
   return 'Joueur';
 }

@@ -12,7 +12,7 @@ import { AuthScreen } from './screens/AuthScreen';
 import { OnboardingScreen } from './screens/OnboardingScreen';
 import { HomeScreen } from './screens/HomeScreen';
 import { CommunityScreen } from './screens/CommunityScreen';
-import { ProfileScreen } from './screens/ProfileScreen';
+import { RankingScreen } from './screens/RankingScreen';
 import { PlayerProfileScreen } from './screens/PlayerProfileScreen';
 import { PlaySetupScreen } from './screens/play/PlaySetupScreen';
 import { PlayScoringScreen } from './screens/play/PlayScoringScreen';
@@ -29,7 +29,7 @@ const AuthStack = createNativeStackNavigator();
 const HomeStack = createNativeStackNavigator();
 const PlayStack = createNativeStackNavigator();
 const CommunityStack = createNativeStackNavigator();
-const ProfileStack = createNativeStackNavigator();
+const RankingStack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
 function BrandSplash() {
@@ -89,12 +89,13 @@ function CommunityStackNavigator() {
   );
 }
 
-function ProfileStackNavigator() {
+function RankingStackNavigator() {
   const { palette } = useUi();
   return (
-    <ProfileStack.Navigator screenOptions={stackScreenOptions(palette)}>
-      <ProfileStack.Screen name="ProfileMain" component={ProfileScreen} options={{ headerShown: false }} />
-    </ProfileStack.Navigator>
+    <RankingStack.Navigator screenOptions={stackScreenOptions(palette)}>
+      <RankingStack.Screen name="RankingMain" component={RankingScreen} options={{ headerShown: false }} />
+      <RankingStack.Screen name="PlayerProfile" component={PlayerProfileScreen} options={{ title: 'Joueur' }} />
+    </RankingStack.Navigator>
   );
 }
 
@@ -140,7 +141,7 @@ function MainTabsNavigator({ communityBadgeCount, onCommunityFocus }) {
             HomeTab: 'home',
             PlayTab: 'play',
             CommunityTab: 'crew',
-            ProfileTab: 'profile',
+            RankingTab: 'profile',
           };
           return <Icon name={map[route.name]} active={focused} color={color} size={size + 2} />;
         },
@@ -163,7 +164,11 @@ function MainTabsNavigator({ communityBadgeCount, onCommunityFocus }) {
           },
         }}
       />
-      <Tab.Screen name="ProfileTab" component={ProfileStackNavigator} options={{ tabBarLabel: t('tabs.profile') }} />
+      <Tab.Screen
+        name="RankingTab"
+        component={RankingStackNavigator}
+        options={{ tabBarLabel: t('tabs.ranking', undefined, 'Classement') }}
+      />
     </Tab.Navigator>
   );
 }
@@ -384,7 +389,7 @@ export default function App() {
 const styles = StyleSheet.create({
   fontFallback: {
     flex: 1,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: theme.colors.bg,
   },
   splash: {
     flex: 1,

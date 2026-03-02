@@ -652,6 +652,59 @@ function winnerSideFromSets(sets = []) {
   return wonA >= wonB ? 'A' : 'B';
 }
 
+function applyConfidenceMultiplierToPlayerUpdate(update, currentUser, multiplier) {
+  if (String(update?.id ?? '').startsWith('guest:')) {
+    return update;
+  }
+  const safeMultiplier = Number.isFinite(multiplier) ? Math.max(0, Math.min(1, multiplier)) : 1;
+  if (safeMultiplier === 1) {
+    return update;
+  }
+
+  const previousRating = Number(update?.previousRating ?? currentUser?.rating ?? 1200);
+  const previousPir = Number(currentUser?.pir ?? update?.pir?.pir ?? 50);
+  const rawDelta = Number(update?.delta ?? 0);
+  const scaledDelta = Number((rawDelta * safeMultiplier).toFixed(2));
+  const rawPairDelta = Number(update?.pairDelta ?? 0);
+  const scaledPairDelta = Number((rawPairDelta * safeMultiplier).toFixed(2));
+  const rawPir = Number(update?.pir?.pir ?? previousPir);
+  const scaledPir = Number((previousPir + (rawPir - previousPir) * safeMultiplier).toFixed(2));
+
+  return {
+    ...update,
+    delta: scaledDelta,
+    pairDelta: scaledPairDelta,
+    newRating: Number((previousRating + scaledDelta).toFixed(2)),
+    pir: {
+      ...(update?.pir ?? {}),
+      pir: scaledPir,
+    },
+    breakdown: {
+      ...(update?.breakdown ?? {}),
+      confidenceMultiplier: safeMultiplier,
+    },
+  };
+}
+
+function applyConfidenceMultiplierToResult(result, usersById, multiplier) {
+  const safeMultiplier = Number.isFinite(multiplier) ? Math.max(0, Math.min(1, multiplier)) : 1;
+  if (safeMultiplier === 1) {
+    return result;
+  }
+
+  return {
+    ...result,
+    teamA: (result?.teamA ?? []).map((update) =>
+      applyConfidenceMultiplierToPlayerUpdate(update, usersById.get(update.id), safeMultiplier)),
+    teamB: (result?.teamB ?? []).map((update) =>
+      applyConfidenceMultiplierToPlayerUpdate(update, usersById.get(update.id), safeMultiplier)),
+    summary: {
+      ...(result?.summary ?? {}),
+      confidenceMultiplier: safeMultiplier,
+    },
+  };
+}
+
 function buildPirImpact(match, userId) {
   if (!match?.ratingResult || match.mode !== 'ranked') {
     return null;
@@ -691,7 +744,11 @@ export async function createMatch(payload, createdBy) {
   const matchFormat = normalizeMatchFormat(payload.matchFormat);
   validateSetsByFormat(payload.sets, matchFormat);
   const userIds = extractUserIds(teamA, teamB);
-  const mode = payload.mode === 'friendly' ? 'friendly' : 'ranked';
+  const mode = payload.mode === 'friendly'
+    ? 'friendly'
+    : payload.mode === 'anonymous'
+      ? 'anonymous'
+      : 'ranked';
 
   if (!userIds.includes(createdBy)) {
     throw new Error('Creator must be one of the match players');
@@ -699,6 +756,14 @@ export async function createMatch(payload, createdBy) {
 
   if (mode === 'ranked' && (containsGuest(teamA) || containsGuest(teamB))) {
     throw new Error('Ranked mode only accepts registered players');
+  }
+
+  if (mode === 'anonymous') {
+    const anonymousLevels = new Set(['beginner', 'intermediate', 'advanced', 'expert']);
+    const opponentLevel = String(payload.opponentLevel ?? '').toLowerCase();
+    if (!anonymousLevels.has(opponentLevel)) {
+      throw new Error('Invalid anonymous opponent level');
+    }
   }
 
   const uniqueUsers = new Set(userIds);
@@ -725,8 +790,9 @@ export async function createMatch(payload, createdBy) {
 
   const splitCost = Number((billing.totalCostEur / 4).toFixed(2));
   const validationMode = mode === 'ranked' ? 'cross' : 'friendly';
-  const rawPendingValidators = mode === 'friendly' ? [] : userIds.filter((id) => id !== createdBy);
-  const requiredValidations = mode === 'friendly' ? 0 : rawPendingValidators.length;
+  const skipValidation = mode === 'friendly' || mode === 'anonymous';
+  const rawPendingValidators = skipValidation ? [] : userIds.filter((id) => id !== createdBy);
+  const requiredValidations = skipValidation ? 0 : rawPendingValidators.length;
   const pendingValidators = rawPendingValidators;
 
   const created = await store.createMatch({
@@ -763,6 +829,9 @@ export async function createMatch(payload, createdBy) {
     },
     stressTag,
     isKeyMatch,
+    anonymousOpponents: mode === 'anonymous',
+    opponentLevel: mode === 'anonymous' ? String(payload.opponentLevel ?? '').toLowerCase() : null,
+    confidenceMultiplier: mode === 'anonymous' ? 0.5 : 1,
   });
 
   if (payload.liveMatchId) {
@@ -796,6 +865,12 @@ export async function createMatch(payload, createdBy) {
     await maybeNotifyRivalryAlert(friendlyMatch);
     await notifyMatchCreated(friendlyMatch);
     return friendlyMatch;
+  }
+
+  if (mode === 'anonymous') {
+    const rated = await rateValidatedMatch(created.id);
+    await notifyMatchCreated(rated);
+    return rated;
   }
 
   if (requiredValidations === 0) {
@@ -934,14 +1009,16 @@ export async function rateValidatedMatch(matchId) {
     teamA,
     teamB,
   });
+  const confidenceMultiplier = Number(match.confidenceMultiplier ?? 1);
+  const scaledResult = applyConfidenceMultiplierToResult(result, usersById, confidenceMultiplier);
 
   const teamARating = average(teamA.map((entry) => Number(entry?.rating ?? 1200)).filter((value) => Number.isFinite(value) && value > 0));
   const teamBRating = average(teamB.map((entry) => Number(entry?.rating ?? 1200)).filter((value) => Number.isFinite(value) && value > 0));
   const stressTag = computeStressTag(match.sets ?? [], teamARating, teamBRating);
-  const rivalryBreak = await detectRivalryBreak(match, userIds, result.summary?.winner ?? winnerSideFromSets(match.sets ?? []));
+  const rivalryBreak = await detectRivalryBreak(match, userIds, scaledResult.summary?.winner ?? winnerSideFromSets(match.sets ?? []));
   const isKeyMatch = computeIsKeyMatch(match.sets ?? [], teamARating, teamBRating, rivalryBreak);
 
-  for (const update of [...result.teamA, ...result.teamB]) {
+  for (const update of [...scaledResult.teamA, ...scaledResult.teamB]) {
     if (String(update.id).startsWith('guest:')) {
       continue;
     }
@@ -951,8 +1028,8 @@ export async function rateValidatedMatch(matchId) {
       continue;
     }
 
-    const winner = result.summary?.winner;
-    const side = result.teamA.some((p) => p.id === update.id) ? 'A' : 'B';
+    const winner = scaledResult.summary?.winner;
+    const side = scaledResult.teamA.some((p) => p.id === update.id) ? 'A' : 'B';
     const didWin = side === winner;
     const previousHistory = current.history ?? [];
     const nextMatchesPlayed = Math.max(0, (Number(current.calibration?.matchesPlayed ?? 0) || 0) + 1);
@@ -978,16 +1055,16 @@ export async function rateValidatedMatch(matchId) {
   }
 
   if (pairAKey && teamIsFullyRegistered(teamASlots)) {
-    await store.upsertPairRating(pairAKey, result.teamA.reduce((s, p) => s + p.pairRatingAfter, 0) / 2);
+    await store.upsertPairRating(pairAKey, scaledResult.teamA.reduce((s, p) => s + p.pairRatingAfter, 0) / 2);
   }
   if (pairBKey && teamIsFullyRegistered(teamBSlots)) {
-    await store.upsertPairRating(pairBKey, result.teamB.reduce((s, p) => s + p.pairRatingAfter, 0) / 2);
+    await store.upsertPairRating(pairBKey, scaledResult.teamB.reduce((s, p) => s + p.pairRatingAfter, 0) / 2);
   }
 
   const validatedMatch = await store.updateMatch(matchId, {
     status: 'validated',
     rated: true,
-    ratingResult: result,
+    ratingResult: scaledResult,
     validatedAt: new Date().toISOString(),
     stressTag,
     isKeyMatch,

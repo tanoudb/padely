@@ -100,6 +100,7 @@ export class FirestoreStore {
   pairRatings() { return this.db.collection('pairRatings'); }
   leaderboards() { return this.db.collection('leaderboards'); }
   badges() { return this.db.collection('badges'); }
+  groups() { return this.db.collection('groups'); }
 
   async createUser({ email, passwordHash, provider, displayName, isVerified }) {
     await this.ensureReady();
@@ -483,5 +484,74 @@ export class FirestoreStore {
     await this.ensureReady();
     const doc = await this.leaderboards().doc(city.toLowerCase()).get();
     return doc.exists ? (doc.data().rows ?? []) : [];
+  }
+
+  async createGroup(group) {
+    await this.ensureReady();
+    const id = group?.id ?? newId('grp');
+    const payload = {
+      id,
+      name: String(group?.name ?? '').trim(),
+      type: group?.type === 'club' ? 'club' : 'private',
+      createdBy: String(group?.createdBy ?? ''),
+      members: [...new Set((group?.members ?? []).map((item) => String(item ?? '').trim()).filter(Boolean))],
+      clubCode: group?.clubCode ? String(group.clubCode).trim() : null,
+      createdAt: group?.createdAt ?? nowIso(),
+      lastMessageAt: group?.lastMessageAt ?? null,
+    };
+    await this.groups().doc(id).set(payload);
+    return payload;
+  }
+
+  async getGroupById(groupId) {
+    await this.ensureReady();
+    const doc = await this.groups().doc(groupId).get();
+    return doc.exists ? doc.data() : null;
+  }
+
+  async listGroupsForUser(userId) {
+    await this.ensureReady();
+    const snap = await this.groups().where('members', 'array-contains', userId).get();
+    return snap.docs
+      .map((doc) => doc.data())
+      .sort((a, b) => new Date(b.lastMessageAt ?? b.createdAt ?? 0).getTime() - new Date(a.lastMessageAt ?? a.createdAt ?? 0).getTime());
+  }
+
+  async updateGroup(groupId, patch = {}) {
+    await this.ensureReady();
+    const current = await this.getGroupById(groupId);
+    if (!current) {
+      return null;
+    }
+    const members = patch.members
+      ? [...new Set((patch.members ?? []).map((item) => String(item ?? '').trim()).filter(Boolean))]
+      : (current.members ?? []);
+    const next = {
+      ...current,
+      ...patch,
+      members,
+    };
+    await this.groups().doc(groupId).set(next, { merge: true });
+    return next;
+  }
+
+  async addGroupMember(groupId, userId) {
+    const current = await this.getGroupById(groupId);
+    if (!current) {
+      return null;
+    }
+    return this.updateGroup(groupId, {
+      members: [...new Set([...(current.members ?? []), userId])],
+    });
+  }
+
+  async removeGroupMember(groupId, userId) {
+    const current = await this.getGroupById(groupId);
+    if (!current) {
+      return null;
+    }
+    return this.updateGroup(groupId, {
+      members: (current.members ?? []).filter((memberId) => memberId !== userId),
+    });
   }
 }

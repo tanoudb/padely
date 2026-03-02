@@ -89,7 +89,8 @@ const createMatchSchema = z.object({
   teamA: z.array(participantSlotSchema).length(2, 'L equipe A doit avoir 2 joueurs'),
   teamB: z.array(participantSlotSchema).length(2, 'L equipe B doit avoir 2 joueurs'),
   sets: z.array(matchSetSchema).min(1, 'Au moins un set est requis'),
-  mode: z.enum(['ranked', 'friendly']).optional(),
+  mode: z.enum(['ranked', 'friendly', 'anonymous']).optional(),
+  opponentLevel: z.enum(['beginner', 'intermediate', 'advanced', 'expert']).optional(),
   matchFormat: z.enum(['standard', 'club', 'marathon']).optional(),
   goldenPoints: z.object({
     teamA: z.coerce.number().int().min(0),
