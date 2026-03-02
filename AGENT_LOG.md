@@ -197,3 +197,17 @@ Validation: backend tests OK `32/32` (`npm test`), bundle mobile iOS exporté av
 ✅
 ### Prochaine mission recommandée
 PARTAGE SOCIAL (image résultat premium) dès que l’installation de `react-native-view-shot` est possible (réseau npm indisponible sur ce run)
+
+## [2026-03-02] — Run #12
+### Mission
+REFONTE SCORING + HAPTICS
+### Résultat
+Le scoring en match est maintenant totalement immersif: interface plein écran avec deux zones rouges/bleues, score géant (120+) et feedback visuel instantané sur l’équipe qui vient de marquer.
+Chaque action déclenche des haptics adaptés (medium sur point, heavy sur jeu, success à la fin), avec un rebond de score fluide et un indicateur de service visuel pour réduire les erreurs d’arbitrage.
+### Technique
+Mobile: refonte complète de `mobile/src/screens/play/PlayScoringScreen.js` (layout immersif, gradients dynamiques day/night, animation bounce `withSpring` config 15/150/0.8, flash accent côté gagnant, service indicator SVG, footer actions localisées). Palette étendue avec teinte info/bleu dans `mobile/src/state/ui.js` pour supporter la moitié bleue sans hardcode global.
+Validation: backend tests `32/32` (`npm test`) + export Expo iOS et Android réussis (`npx expo export --platform ios|android`).
+### Statut
+✅
+### Prochaine mission recommandée
+PARTAGE SOCIAL (image résultat premium noir/or + share sheet natif)
