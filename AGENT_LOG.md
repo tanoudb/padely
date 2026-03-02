@@ -239,3 +239,17 @@ Nouveaux briques UI/animation: `mobile/src/hooks/usePadelyAnimations.js` (`useSt
 ✅
 ### Prochaine mission recommandée
 PARTAGE SOCIAL (image de résultat premium + share sheet), dès que la dépendance capture (`react-native-view-shot`) est installable
+
+## [2026-03-02] — Run #15
+### Mission
+REFONTE AUTH SCREEN
+### Résultat
+L’écran d’authentification est maintenant premium et immédiatement identifiable: branding PADELY noir/or, inputs minimalistes, CTA principal hauteur 60, et hiérarchie visuelle claire entre connexion, inscription et vérification OTP.
+L’entrée est animée en séquence (800ms total) avec transitions progressives, support day/night natif via `palette.*`, et UX plus nette sur mobile grâce à une structure scrollable/keyboard-safe.
+### Technique
+Mobile: refonte complète `mobile/src/screens/AuthScreen.js` (nouvelle composition visuelle, couches de fond, carte auth unique, mode switch login/register, flow OTP dédié, boutons primary/secondary/ghost, animations Reanimated séquencées + conservation des erreurs inline avec shake). i18n: nouvelles clés FR/EN dans `mobile/src/i18n/dictionaries.js` (`auth.tagline`, `auth.switchToLogin`, `auth.switchToRegister`, `auth.backToAuth`).
+Validation: backend tests `34/34` (`npm test`), bundles Expo iOS et Android exportés avec succès (`npx expo export --platform ios|android`).
+### Statut
+✅
+### Prochaine mission recommandée
+PARTAGE SOCIAL (image résultat premium + share sheet natif), dès que la dépendance capture image est installable
